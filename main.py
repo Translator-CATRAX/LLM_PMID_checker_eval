@@ -30,13 +30,16 @@ def read_KGX(input_KGX_file):
 
 def read_mapping(mapping_file):
     category_mapping = dict()
+    toolkit = bmt.toolkit.Toolkit()
+    # Cache pour éviter de recalculer la hiérarchie pour chaque ligne
+    # Structure: { category_name: (biolink_branch, depth) }
+    cache_branch = {}
 
     # line counter:
     with open(mapping_file, encoding='utf-8') as f:
         total_lines = sum(1 for _ in f)
   
     with open(mapping_file, encoding='utf-8') as f:
-        category_mapping = dict()
         for line in tqdm(f, total=total_lines, desc="Processing mapping"):
             try:
                 data = json.loads(line)
@@ -44,9 +47,29 @@ def read_mapping(mapping_file):
                 if len(id) != 0:
                     if id not in category_mapping.keys():
                         category_mapping[id] = {}
-                        category_mapping[id]['category']=data['category'][0]
-                        category_mapping[id]['name']=data['name']
-                        # using bmt, get highest parent of the node category that in not NamedThing and add it to category_mapping[id]['biolink_branch']. calculate the depth from the node category to the category_mapping[id]['biolink_branch']
+                        cat_name = data['category'][0]
+                        category_mapping[id]['category'] = cat_name
+                        category_mapping[id]['name'] = data['name']
+                        
+                        # Calcul de la branche et de la profondeur avec cache
+                        if cat_name not in cache_branch:
+                            # Récupère tous les ancêtres (sans inclure le nœud lui-même)
+                            ancestors = toolkit.get_ancestors(cat_name, reflexive=False)
+                            # On filtre pour exclure tout ce qui est lié à NamedThing
+                            filtered_ancestors = [a for a in ancestors if "NamedThing" not in a]
+                            
+                            if filtered_ancestors:
+                                # Le plus haut ancêtre (le plus général) est le dernier de la liste
+                                branch = filtered_ancestors[-1]
+                                depth = toolkit.get_element_depth(cat_name) - toolkit.get_element_depth(branch)
+                                cache_branch[cat_name] = (branch, depth)
+                            else:
+                                # Si aucun ancêtre n'est trouvé en dehors de NamedThing
+                                cache_branch[cat_name] = (cat_name, 0)
+                        
+                        branch, depth = cache_branch[cat_name]
+                        category_mapping[id]['biolink_branch'] = branch
+                        category_mapping[id]['depth'] = depth
 
             except (json.JSONDecodeError, KeyError):
                 continue
@@ -61,8 +84,8 @@ def main(kgx_dict,category_mapping_dict):
 
 if __name__ == "__main__":
     # load data (TO BE UPDATED AFTER AUTOMATION):
-    input_KGX_file = './data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
-    biolink_id_to_category_mapping = './data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
+    input_KGX_file = './data/kg2.10.3_semmeddb_for_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
+    biolink_id_to_category_mapping = './data/kg2.10.3_semmeddb_for_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
     output_file = './data/KGX_computed_degrees.json'
 
     print('load KGX:')
