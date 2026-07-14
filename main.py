@@ -4,6 +4,22 @@ import json
 from tqdm import tqdm
 import bmt
 
+def get_highest_parent_below_namedthing(toolkit, cat_name):
+    """
+    Calcule le parent le plus élevé qui n'est pas NamedThing et la profondeur.
+    Utilise toolkit.get_parent de manière itérative.
+    """
+    current_node = cat_name
+    depth = 0
+    while True:
+        parent = toolkit.get_parent(current_node, False)
+        # Si pas de parent trouvé ou si le parent est NamedThing, on s'arrête
+        if not parent or "NamedThing" in parent:
+            return current_node, depth
+        else:
+            current_node = parent
+            depth += 1
+
 def read_KGX(input_KGX_file):
     # need to verify that data['id'] is unique
     kgx_dict = dict()
