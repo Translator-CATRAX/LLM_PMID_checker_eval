@@ -3,6 +3,7 @@ import KGX_node_metrics
 import json
 from tqdm import tqdm
 import bmt
+import sys
 
 def get_highest_parent_below_namedthing(toolkit, cat_name):
     """
@@ -92,6 +93,16 @@ if __name__ == "__main__":
     input_KGX_file = './data/kg2.10.3_semmeddb_for_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
     biolink_id_to_category_mapping = './data/kg2.10.3_semmeddb_for_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
     output_file = './data/KGX_computed_degrees.json'
+
+    # Vérification de l'existence des fichiers avant de commencer
+    required_files = [input_KGX_file, biolink_id_to_category_mapping]
+    missing_files = [f for f in required_files if not os.path.exists(f)]
+
+    if missing_files:
+        print("ERREUR : Les fichiers suivants sont introuvables. Veuillez vérifier vos chemins :")
+        for f in missing_files:
+            print(f"  - {f}")
+        sys.exit(1)
 
     print('load KGX:')
     kgx_dict = read_KGX(input_KGX_file)
