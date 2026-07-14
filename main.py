@@ -20,12 +20,16 @@ def get_highest_parent_below_namedthing(toolkit, cat_name):
             current_node = parent
             depth += 1
 
-def read_KGX(input_KGX_file):
+def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate','category','publications']):
     # need to verify that data['id'] is unique
     kgx_dict = dict()
-    headers_of_interest = ['subject','object','predicate','category','publications']
+     
+    
     with open(input_KGX_file, encoding='utf-8') as f:
-        for line in f:
+        total_lines = sum(1 for _ in f)
+    
+    with open(input_KGX_file, encoding='utf-8') as f:
+        for line in tqdm(f, total=total_lines, desc="Processing mapping"):
             try:
                 data = json.loads(line)
                 if 'id' in data.keys():
@@ -67,23 +71,8 @@ def read_mapping(mapping_file):
                         category_mapping[id]['category'] = cat_name
                         category_mapping[id]['name'] = data['name']
                         
-                        # Calcul de la branche et de la profondeur avec cache
-                        if cat_name not in cache_branch:
-                            # Récupère tous les ancêtres (sans inclure le nœud lui-même)
-                            ancestors = toolkit.get_ancestors(cat_name, reflexive=False)
-                            # On filtre pour exclure tout ce qui est lié à NamedThing
-                            filtered_ancestors = [a for a in ancestors if "NamedThing" not in a]
-                            
-                            if filtered_ancestors:
-                                # Le plus haut ancêtre (le plus général) est le dernier de la liste
-                                branch = filtered_ancestors[-1]
-                                depth = toolkit.get_element_depth(cat_name) - toolkit.get_element_depth(branch)
-                                cache_branch[cat_name] = (branch, depth)
-                            else:
-                                # Si aucun ancêtre n'est trouvé en dehors de NamedThing
-                                cache_branch[cat_name] = (cat_name, 0)
                         
-                        branch, depth = cache_branch[cat_name]
+                        branch, depth = get_highest_parent_below_namedthing(toolkit, cat_name)
                         category_mapping[id]['biolink_branch'] = branch
                         category_mapping[id]['depth'] = depth
 
