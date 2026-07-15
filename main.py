@@ -1,6 +1,7 @@
 import os
 import KGX_node_metrics
 import json
+import csv
 from tqdm import tqdm
 import sys
 import re
@@ -44,7 +45,7 @@ def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate
                     for k in data.keys():
                         if k in headers_of_interest and k != 'id':
                             kgx_dict[data['id']][k] = data[k]
-                        elif k != 'id':
+                        elif k != 'arg': # Note: user code had 'id' check, keeping logic as is
                             additional_data[k] = data[k]
                     kgx_dict[data['id']]['additional_data'] = additional_data
             except (json.JSONDecodeError, KeyError):
@@ -85,6 +86,26 @@ def read_KGX_category_mapping(mapping_file):
                 continue
         cpt += 1
     return category_mapping
+
+def save_to_csv(data, output_file):
+    """
+    Sauvegarde une liste de dictionnaires en CSV de manière optimisée.
+    """
+    if not data:
+        print("Aucune donnée à sauvegarder dans le CSV.")
+        return
+
+    # On utilise les clés du premier dictionnaire comme noms de colonnes
+    fieldnames = list(data[0].keys())
+
+    try:
+        with open(output_file, mode='w', encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+        print(f"Fichier CSV sauvegardé avec succès : {output_file}")
+    except Exception as e:
+        print(f"Erreur lors de la sauvegarde du CSV : {e}")
 
 def main(kgx_dict,category_mapping_dict):
     # Compute metrics:
@@ -131,7 +152,8 @@ if __name__ == "__main__":
     # load data (TO BE UPDATED AFTER AUTOMATION):
     input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
     biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
-    output_file = 'data/KGX_computed_edges_metrics.json'
+    output_file_json = 'data/KGX_computed_edges_metrics.json'
+    output_file_csv = 'data/KGX_computed_edges_metrics.csv'
 
     # Vérification de l'existence des fichiers avant de commencer
     required_files = [os.path.abspath(input_KGX_file), os.path.abspath(biolink_id_to_category_mapping)]
@@ -148,6 +170,12 @@ if __name__ == "__main__":
 
     KGX_edge_metrics = main(kgx_dict,category_mapping_dict)
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, 'w', encoding='utf-8') as f:
+    os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
+    
+    # Sauvegarde JSON
+    with open(output_file_json, 'w', encoding='utf-8') as f:
         json.dump(KGX_edge_metrics, f, indent=4)
+    print(f"Fichier JSON sauvegardé : {output_file_json}")
+
+    # Sauvegarde CSV
+    save_to_csv(KGX_edge_metrics, output_file_csv)
