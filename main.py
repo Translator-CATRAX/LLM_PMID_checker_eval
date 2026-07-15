@@ -2,6 +2,7 @@ import os
 import KGX_node_metrics
 import json
 import csv
+import random  # <--- Ajout nécessaire pour l'échantillonnage
 from tqdm import tqdm
 import sys
 import re
@@ -95,7 +96,7 @@ def save_to_csv(data, output_file):
         print("Aucune donnée à sauvegarder dans le CSV.")
         return
 
-    # On utilise les clés du premier dictionnaire comme noms de colonnes
+    # On utilise les clés du premier dictionnaire comme noms de columns
     fieldnames = list(data[0].keys())
 
     try:
@@ -106,6 +107,46 @@ def save_to_csv(data, output_file):
         print(f"Fichier CSV sauvegardé avec succès : {output_file}")
     except Exception as e:
         print(f"Erreur lors de la sauvegarde du CSV : {e}")
+
+def KGX_edge_sampling(data, sample_size=20):
+    """
+    Échantillonne les données en regroupant par toutes les propriétés 
+    sauf l'identifiant unique 'id'.
+    """
+    if not data:
+        return []
+
+    groups = {}
+    # On définit les clés de regroupement (toutes sauf 'id')
+    group_keys = [k for k in data[0].keys() if k != 'id']
+
+    for row in data:
+        # Construction d'une clé de groupe hashable
+        key_values = []
+        for k in group_keys:
+            val = row[k]
+            # Conversion des types non-hashables (set, list) en tuples pour le regroupement
+            if isinstance(val, (set, list)):
+                val = tuple(sorted(list(val)))
+            elif isinstance(val, dict):
+                val = tuple(sorted(val.items()))
+            key_values.append(val)
+        
+        group_key = tuple(key_values)
+
+        if group_key not in groups:
+            groups[group_key] = []
+        groups[group_key].append(row)
+
+    sampled_data = []
+    for group in groups.values():
+        # On échantillonne jusqu'à sample_size pour chaque groupe trouvé
+        if len(prob_group := group) <= sample_size:
+            sampled_data.extend(group)
+        else:
+            sampled_data.extend(random.sample(group, sample_size))
+
+    return sampled_data
 
 def main(kgx_dict,category_mapping_dict):
     # Compute metrics:
@@ -169,6 +210,9 @@ if __name__ == "__main__":
     category_mapping_dict = read_KGX_category_mapping(biolink_id_to_category_mapping)
 
     KGX_edge_metrics = main(kgx_dict,category_mapping_dict)
+    
+    # Application de l'échantillonnage pour réduire la taille du dataset final
+    KGX_edge_metrics = KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
 
     os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
     
