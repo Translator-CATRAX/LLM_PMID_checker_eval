@@ -140,7 +140,7 @@ def main(kgx_dict,category_mapping_dict):
         KGX_edge_metrics['predicate'] = predicate
         KGX_edge_metrics['predicate_biolink_branch'] = biolink_info[predicate]['biolink_branch']
         KGX_edge_metrics['predicate_biolink_depth'] = biolink_info[predicate]['biolink_depth']
-        KGX_edge_metrics['publications_number'] = len(kgx_dict[edge_id])
+        KGX_edge_metrics['publications_number'] = len(kgx_dict[edge_id]['publications'])
 
         KGX_metrics.append(KGX_edge_metrics)
 
