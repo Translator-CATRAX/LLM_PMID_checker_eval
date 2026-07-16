@@ -1,8 +1,8 @@
 import os
 import KGX_node_metrics
+import KGX_metrics_design
 import json
 import csv
-import random  # <--- Ajout nécessaire pour l'échantillonnage
 from tqdm import tqdm
 import sys
 import re
@@ -108,47 +108,9 @@ def save_to_csv(data, output_file):
     except Exception as e:
         print(f"Erreur lors de la sauvegarde du CSV : {e}")
 
-def KGX_edge_sampling(data, sample_size=20):
-    """
-    Échantillonne les données en regroupant par toutes les propriétés 
-    sauf l'identifiant unique 'id'.
-    """
-    if not data:
-        return []
 
-    groups = {}
-    # On définit les clés de regroupement (toutes sauf 'id', 'subject', 'subject_name', 'object', 'object_name')
-    group_keys = [k for k in data[0].keys() if k != 'id' and k != 'subject' and k != 'subject_name' and k != 'object' and k != 'object_name']
 
-    for row in data:
-        # Construction d'une clé de groupe hashable
-        key_values = []
-        for k in group_keys:
-            val = row[k]
-            # Conversion des types non-hashables (set, list) en tuples pour le regroupement
-            if isinstance(val, (set, list)):
-                val = tuple(sorted(list(val)))
-            elif isinstance(val, dict):
-                val = tuple(sorted(val.items()))
-            key_values.append(val)
-        
-        group_key = tuple(key_values)
-
-        if group_key not in groups:
-            groups[group_key] = []
-        groups[group_key].append(row)
-
-    sampled_data = []
-    for group in groups.values():
-        # On échantillonne jusqu'à sample_size pour chaque groupe trouvé
-        if len(prob_group := group) <= sample_size:
-            sampled_data.extend(group)
-        else:
-            sampled_data.extend(random.sample(group, sample_size))
-
-    return sampled_data
-
-def main(kgx_dict,category_mapping_dict):
+def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
     # Compute metrics:
     KGX_nodes_metrics,biolink_info = KGX_node_metrics.compute_KGX_node_metrics(kgx_dict,category_mapping_dict)
 
@@ -188,11 +150,7 @@ def main(kgx_dict,category_mapping_dict):
 
     return KGX_metrics
 
-
-if __name__ == "__main__":
-    # load data (TO BE UPDATED AFTER AUTOMATION):
-    input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
-    biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
+def main(input_KGX_file,biolink_id_to_category_mapping,save_files = True):
     output_file_json = 'data/KGX_computed_edges_metrics.json'
     output_file_csv = 'data/KGX_computed_edges_metrics.csv'
 
@@ -209,19 +167,48 @@ if __name__ == "__main__":
     kgx_dict = read_KGX(input_KGX_file)
     category_mapping_dict = read_KGX_category_mapping(biolink_id_to_category_mapping)
 
-    KGX_edge_metrics = main(kgx_dict,category_mapping_dict)
+    # calculate metrics and map to KGX:
+    KGX_edge_metrics = map_metrics_to_KGX(kgx_dict,category_mapping_dict)
+
+    design_dict = {'id':'ignore',
+                    'subject':'ignore',
+                    'subject_degree': 'powerlaw',
+                    'subject_biolink_category':'ignore',
+                    'subject_biolink_branch':'discrete',
+                    'subject_biolink_depth':'discrete',
+                    'subject_name':'ignore',
+                    'object':'ignore',
+                    'object_degree': 'powerlaw',
+                    'object_biolink_category':'ignore',
+                    'object_biolink_branch':'discrete',
+                    'object_biolink_depth':'discrete',
+                    'object_name':'ignore',
+                    'object_biolink_category':'ignore',
+                    'predicate':'ignore',
+                    'predicate_biolink_branch':'discrete',
+                    'predicate_biolink_depth':'discrete',
+                    'publications_number':'powerlaw'
+                    }
+    D = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
     
-    # Application de l'échantillonnage pour réduire la taille du dataset final
-    KGX_edge_metrics = KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
+    # Application de l'échantillonnage pour réduire la taille du dataset final et créer des balanced classes
+    sampled_data = KGX_metrics_design.KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
 
-    sampled_data = KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
+    if save_files:
+        os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
+        
+        # Sauvegarde JSON
+        with open(output_file_json, 'w', encoding='utf-8') as f:
+            json.dump(KGX_edge_metrics, f, indent=4)
+        print(f"Fichier JSON sauvegardé : {output_file_json}")
 
-    os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
-    
-    # Sauvegarde JSON
-    with open(output_file_json, 'w', encoding='utf-8') as f:
-        json.dump(KGX_edge_metrics, f, indent=4)
-    print(f"Fichier JSON sauvegardé : {output_file_json}")
+        # Sauvegarde CSV
+        save_to_csv(KGX_edge_metrics, output_file_csv)
 
-    # Sauvegarde CSV
-    save_to_csv(KGX_edge_metrics, output_file_csv)
+    return sampled_data
+
+if __name__ == "__main__":
+    # load data (TO BE UPDATED AFTER AUTOMATION):
+    input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
+    biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
+    main(input_KGX_file,biolink_id_to_category_mapping,save_files = False)
