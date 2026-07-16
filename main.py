@@ -117,8 +117,8 @@ def KGX_edge_sampling(data, sample_size=20):
         return []
 
     groups = {}
-    # On définit les clés de regroupement (toutes sauf 'id')
-    group_keys = [k for k in data[0].keys() if k != 'id']
+    # On définit les clés de regroupement (toutes sauf 'id', 'subject', 'subject_name', 'object', 'object_name')
+    group_keys = [k for k in data[0].keys() if k != 'id' and k != 'subject' and k != 'subject_name' and k != 'object' and k != 'object_name']
 
     for row in data:
         # Construction d'une clé de groupe hashable
@@ -213,6 +213,8 @@ if __name__ == "__main__":
     
     # Application de l'échantillonnage pour réduire la taille du dataset final
     KGX_edge_metrics = KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
+
+    sampled_data = KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
 
     os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
     
