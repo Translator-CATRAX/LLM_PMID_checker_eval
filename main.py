@@ -6,23 +6,7 @@ import csv
 from tqdm import tqdm
 import sys
 import re
-
-def extract_mixin_values(input_string):
-    # Pattern explanation:
-    # %s      -> matches literal '%s'
-    # to      -> matches literal 'to'
-    # mixin   -> matches literal 'mixin'
-    pattern = r"(.*?)to(.*?)mixin"
-    
-    match = re.search(pattern, input_string)
-    
-    if match:
-        # Extract the captured groups and convert to integers (or keep as strings)
-        s1 = match.group(1)
-        s2 = match.group(2)
-        return s1, s2
-    else:
-        return None, None
+import polars as pl
 
 
 def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate','publications']):
@@ -57,7 +41,77 @@ def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate
     return kgx_dict
 
 
+def read_KGX_to_parquet(input_KGX_file):
+    """
+    Reads a JSONL KGX file and writes a flattened Parquet file.
+    Every key in the original JSON becomes a column in the Parquet file.
+    The 'publications' list is exploded into multiple rows based on PMID.
+    """
+    # We use a temporary JSONL to avoid keeping everything in RAM
+    temp_flat_jsonl = "temp_flattened_data.jsonl"
+    root, ext = os.path.splitext(input_KGX_file)
+    output_parquet_file = root + ".parquet"
 
+    # 1. Count lines for tqdm progress bar
+    with open(input_KGX_file, 'r', encoding='utf-8') as f:
+        total_lines = sum(1 for _ in f)
+
+    print(f"Total lines to process: {total_lines}")
+
+    # 2. Stream through the input file
+    with open(input_KGX_file, 'r', encoding='utf-8') as f_in, \
+         open(temp_flat_jsonl, 'w', encoding='utf-8') as f_out:
+        
+        for line in tqdm(f_in, total=total_lines, desc="Streaming & Flattening KGX"):
+            try:
+                data = json.loads(line)
+                if 'id' not in data:
+                    continue
+                
+                # Prepare the base record: 
+                base_record = data.copy()
+                # base_record['idx'] = base_record.pop('id')
+                
+                # Extract publications for the explosion
+                publications = data.get('publications', [])
+                
+                if not publications:
+                    # If there are no publications, we still want the record, 
+                    # but with PMID as None so it can still join/exist.
+                    base_record['PMID'] = None
+                    f_out.write(json.dumps(base_record) + '\n')
+                else:
+                    # THE EXPLOSION: Create one row for every PMID found
+                    for pmid in publications:
+                        flat_record = base_record.copy()
+                        flat_record['PMID'] = pmid
+                        f_out.write(json.dumps(flat_record) + '\n')
+
+            except (json.JSONDecoderonError, KeyError) as e:
+                # It's better to see what went wrong during debugging
+                # print(f"Error processing line: {e}")
+                continue
+
+    # 3. Conve6rt the flattened JSONL into a high-performance Parquet
+    print("Converting flattened JSONL to Polars DataFrame...")
+    try:
+        df_final = pl.read_ndjson(temp_flat_jsonl)
+        
+        print(f"Writing to {output_parquet_file}...")
+        df_final.write_parquet(output_parquet_file)
+        
+        # 4. Clean up the temporary file
+        if os.path.exists(temp_flat_jsonl):
+            os.remove(temp_flat_jsonl)
+            
+        print(f"Done! Successfully saved to {output_parquet_file}")
+        return output_parquet_file
+
+    except Exception as e:
+        print(f"Error during Polars conversion: {e}")
+        if os.path.exists(temp_flat_jsonl):
+            os.remove(temp_flat_jsonl)
+        raise
 
 def read_KGX_category_mapping(mapping_file):
 
@@ -108,15 +162,42 @@ def save_to_csv(data, output_file):
     except Exception as e:
         print(f"Erreur lors de la sauvegarde du CSV : {e}")
 
+def save_to_parquet(updated_data, output_file_path):
+    """
+    Converts a list of dictionaries (KG edges) into a Polars DataFrame
+    and saves it as a high-performance Parquet file.
+    
+    Args:
+        updated_data (list of dict): The KG edge data with all computed features.
+        output_template (str): The destination path (e.g., 'processed_kg.parquet').
+    """
+    if not updated_data:
+        print("Error: The data list is empty. Nothing to save.")
+        return
 
+    try:
+        # 1. Convert the list of dictionaries directly to a Polars DataFrame
+        # Polars is highly optimized for this conversion.
+        df = pl.DataFrame(updated_data)
+
+        # 2. Write to Parquet
+        # We use compression='snappy' (default) which provides a great balance 
+        # between file size and read/write speed.
+        df.write_parquet(output_file_path, compression="snappy")
+        
+        print(f"Successfully saved {len(df)} edges to: {output_file_path}")
+        
+    except Exception as e:
+        print(f"Failed to save Parquet file. Error: {e}")
 
 def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
     # Compute metrics:
     KGX_nodes_metrics,biolink_info = KGX_node_metrics.compute_KGX_node_metrics(kgx_dict,category_mapping_dict)
 
+    ## Append to dict:
     KGX_metrics = []
     total_lines = len(kgx_dict.keys())
-    for edge_id in tqdm(kgx_dict.keys(), total=total_lines, desc="Mapping metrics"):
+    for edge_id in tqdm(kgx_dict.keys(), total=total_lines, desc="Mapping metrics to KGX"):
         subject = kgx_dict[edge_id]['subject']
         object = kgx_dict[edge_id]['object']
         predicate = kgx_dict[edge_id]['predicate']
@@ -145,14 +226,72 @@ def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
         KGX_edge_metrics['predicate_biolink_depth'] = biolink_info[predicate]['biolink_depth']
         KGX_edge_metrics['publications_number'] = len(kgx_dict[edge_id]['publications'])
 
-        KGX_metrics.append(KGX_edge_metrics)
-
+        ## Flatten dict:
+        for pub in kgx_dict[edge_id]['publications']:
+            KGX_edge_metrics['publications'] = pub
+            KGX_metrics.append(KGX_edge_metrics)
+    
 
     return KGX_metrics
 
-def main(input_KGX_file,biolink_id_to_category_mapping,save_files = True):
-    output_file_json = 'data/KGX_computed_edges_metrics.json'
-    output_file_csv = 'data/KGX_computed_edges_metrics.csv'
+def build_edges_test_suite(kg_path, ml_results_path, sample_size=20):
+    """
+    Builds a stratified test suite by joining exploded KG evidence 
+    with ML predictions and sampling PMIDs per stratum.
+    
+    Args:
+        kg_path (str): Path to the Parquet file containing KG edges (with 'publications' list).
+        ml_results_path (str): Path to the Parquet file with ML predictions (contains 'predicted').
+        sample_szie (int): Number of PMIDs to sample per stratum.
+        
+    Returns:
+        pl.DataFrame: The final sampled test suite.
+    """
+    
+    # 1. Load the KG Data (Object A)
+    # This contains your features: complexity, asymmetry, is_hub_edge, etc.
+    kg_df = pl.read_parquet(kg_path)
+
+    # 2. Flatten (Explode) the publications
+    # Each row now represents one specific PMID for a specific edge.
+    # All edge-level features (complexity, etc.) are duplicated across these rows.
+    exploded_kg = kg_df.explode("publications")
+
+    # 3. Load the ML Results
+    # This file must contain: ['subject', 'predicate', 'object', 'predicted']
+    ml_results = pl.read_parquet(ml_results_path)
+
+    # 4. Perform the Join
+    # We join on the triple identity. The 'predicted' column is brought into our exploded KG.
+    # We use an 'inner' join to ensure we only test PMIDs that actually have a prediction.
+    joined_df = exploded_kg.join(
+        ml_results, 
+        on=['subject', 'predicate', 'object'], 
+        how='inner'
+    )
+
+    # 5. Stratified Sampling
+    # We identify all columns that define our 'strata' (everything except the unique ID and PMID)
+    # We group by these strata and take the first N PMIDs found in each group.
+    
+    # Identify grouping columns: everything except 'id' and 'publications'
+    group_cols = [
+        col for col in joined_df.columns 
+        if col not in ['id', 'publications', 'predicted']
+    ]
+
+    # Perform the sampling
+    # .head(sample_size) is extremely fast in Polars for this purpose.
+    test_suite = (
+        joined_df
+        .group_by(group_cols)
+        .head(sample_size)
+    )
+
+    return test_suite
+
+def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,save_files = True):
+
 
     # Vérification de l'existence des fichiers avant de commencer
     required_files = [os.path.abspath(input_KGX_file), os.path.abspath(biolink_id_to_category_mapping)]
@@ -165,6 +304,7 @@ def main(input_KGX_file,biolink_id_to_category_mapping,save_files = True):
         sys.exit(1)
 
     kgx_dict = read_KGX(input_KGX_file)
+    # kgx_parquet = read_KGX_to_parquet(input_KGX_file)
     category_mapping_dict = read_KGX_category_mapping(biolink_id_to_category_mapping)
 
     # calculate metrics and map to KGX:
@@ -189,21 +329,45 @@ def main(input_KGX_file,biolink_id_to_category_mapping,save_files = True):
                     'predicate_biolink_depth':'discrete',
                     'publications_number':'powerlaw'
                     }
-    D = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
-    
-    # Application de l'échantillonnage pour réduire la taille du dataset final et créer des balanced classes
-    sampled_data = KGX_metrics_design.KGX_edge_sampling(KGX_edge_metrics, sample_size=20)
+    # metrics_transformed,sampled_data = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
+    metrics_transformed = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
+
+
+
+
+
+    ## JOINTURE AVEC RESULTS
+    #### Transform metrics_transformed into pl format
+    df = pl.read_parquet(LLM_checker_results_file)
+
+
 
     if save_files:
+        output_file_json = 'data/KGX_computed_edges_metrics.json'
+        output_file_csv = 'data/KGX_computed_edges_metrics.csv'
+        print('save transformed metrics:') ############### TO CHANGE INTO parquet format
         os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
         
         # Sauvegarde JSON
-        with open(output_file_json, 'w', encoding='utf-8') as f:
-            json.dump(KGX_edge_metrics, f, indent=4)
-        print(f"Fichier JSON sauvegardé : {output_file_json}")
+        # with open(output_file_json, 'w', encoding='utf-8') as f:
+        #     json.dump(KGX_edge_metrics, f, indent=4)
+        # print(f"Fichier JSON sauvegardé : {output_file_json}")
 
         # Sauvegarde CSV
         save_to_csv(KGX_edge_metrics, output_file_csv)
+
+        print('save transformed metrics:')
+        output_file_json = 'data/KGX_computed_edges_transformed_metrics.json'
+        output_file_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
+        os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
+        
+        # Sauvegarde JSON
+        # with open(output_file_json, 'w', encoding='utf-8') as f:
+        #     json.dump(metrics_transformed, f, indent=4)
+        # print(f"Fichier JSON sauvegardé : {output_file_json}")
+
+        # Sauvegarde CSV
+        save_to_csv(metrics_transformed, output_file_csv)
 
     return sampled_data
 
@@ -211,4 +375,5 @@ if __name__ == "__main__":
     # load data (TO BE UPDATED AFTER AUTOMATION):
     input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
     biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
-    main(input_KGX_file,biolink_id_to_category_mapping,save_files = False)
+    LLM_checker_results_file = 'data/LLM_Pmid_Evaluation_SemMedDB_v1.0/results.parquet'
+    main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,save_files = False)

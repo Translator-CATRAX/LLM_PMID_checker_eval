@@ -42,6 +42,22 @@ def get_highest_parent_below_root(toolkit, cat_name):
         else:
             current_node = parent
             depth += 1
+# def extract_mixin_values(input_string):
+#     # Pattern explanation:
+#     # %s      -> matches literal '%s'
+#     # to      -> matches literal 'to'
+#     # mixin   -> matches literal 'mixin'
+#     pattern = r"(.*?)to(.*?)mixin"
+    
+#     match = re.search(pattern, input_string)
+    
+#     if match:
+#         # Extract the captured groups and convert to integers (or keep as strings)
+#         s1 = match.group(1)
+#         s2 = match.group(2)
+#         return s1, s2
+#     else:
+#         return None, None
 
 def get_biolink_info():
 
