@@ -105,7 +105,7 @@ def transform_metrics(data, columns_type):
                                                                                                                                                     
     # Mais ici, on va modifier les valeurs des colonnes 'powerlaw' directement.                                                                                                                                                                         
                                                                                                                                                                                                                                                 
-    for column, col_type in tqdm(columns_type.items(), total=len(columns_type.keys()), desc="data_out transformation"):                                                                                                                                                                                                       
+    for column, col_type in tqdm(columns_type.items(), total=len(columns_type.keys()), desc="Data processing:"):                                                                                                                                                                                                       
         if column not in base_keys:                                                                                                                                                                                                                     
             continue                                                                                                                                                                                                                                    
                                                                                                                                                                                                                                                         
@@ -376,7 +376,6 @@ def feature_assymetry_classification(data, column_to_read, new_column_name):
     # 2. Calculate Quantile Boundaries
     # We use the 25th and 75th percentiles to create 3 equal-sized groups (Tertiaries)
     # This prevents "strata explosion" while capturing the distribution shape.
-    p25 = np.percentile(values, 25)
     p75 = np.percentile(values, 75)
 
     # 3. Apply classification to each entry
@@ -419,18 +418,11 @@ if __name__ == "__main__":
     columns_type = {'id':'ignore',
                     'subject':'ignore',
                     'subject_degree': 'powerlaw',
-                    'subject_biolink_category':'ignore',
                     'subject_biolink_branch':'discrete',
                     'subject_biolink_depth':'discrete',
-                    'subject_name':'ignore',
-                    'object':'ignore',
                     'object_degree': 'powerlaw',
-                    'object_biolink_category':'ignore',
                     'object_biolink_branch':'discrete',
                     'object_biolink_depth':'discrete',
-                    'object_name':'ignore',
-                    'object_biolink_category':'ignore',
-                    'predicate':'ignore',
                     'predicate_biolink_branch':'discrete',
                     'predicate_biolink_depth':'discrete',
                     'publications_number':'powerlaw'

@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate','publications']):
+def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject','subject_form_or_variant_qualifier','object','original_object','object_aspect_qualifier','object_direction_qualifier','predicate','qualified_predicate','publications']):
     # need to verify that data['id'] is unique
     kgx_dict = dict()
      
@@ -28,13 +28,11 @@ def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate
                     additional_data = dict()
                     kgx_dict[data['id']] = dict()
                     for h in headers_of_interest: # init
-                        kgx_dict[data['id']][h] = []
+                        kgx_dict[data['id']][h] = None
                     for k in data.keys():
                         if k in headers_of_interest and k != 'id':
                             kgx_dict[data['id']][k] = data[k]
-                        elif k != 'arg': # Note: user code had 'id' check, keeping logic as is
-                            additional_data[k] = data[k]
-                    kgx_dict[data['id']]['additional_data'] = additional_data
+
             except (json.JSONDecodeError, KeyError):
                 print(f'Read line {cpt} issue')
                 continue
@@ -196,54 +194,53 @@ def save_to_parquet(updated_data, output_file_path):
         print(f"An error occurred during saving: {e}")
         raise
 
-
-def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
-    # Compute metrics:
-    KGX_nodes_metrics,biolink_info = KGX_node_metrics.compute_KGX_node_metrics(kgx_dict,category_mapping_dict)
-
-    ## Append to dict:
-    KGX_metrics = []
-    total_lines = len(kgx_dict.keys())
-    for edge_id in tqdm(kgx_dict.keys(), total=total_lines, desc="Mapping metrics to KGX"):
-        subject = kgx_dict[edge_id]['subject']
-        object = kgx_dict[edge_id]['object']
-        predicate = kgx_dict[edge_id]['predicate']
-
-        KGX_edge_metrics = {}
-        # append subject metrics:
-        KGX_edge_metrics['id'] = edge_id
-        KGX_edge_metrics['subject'] = subject
-        KGX_edge_metrics['subject_degree'] = KGX_nodes_metrics[subject]['degree']
-        KGX_edge_metrics['subject_biolink_category'] = KGX_nodes_metrics[subject]['biolink_category']
-        KGX_edge_metrics['subject_biolink_branch'] = KGX_nodes_metrics[subject]['biolink_branch']
-        KGX_edge_metrics['subject_biolink_depth'] = KGX_nodes_metrics[subject]['biolink_depth']
-        KGX_edge_metrics['subject_name'] = KGX_nodes_metrics[subject]['name']
-
-        # append object metrics:
-        KGX_edge_metrics['object'] = object
-        KGX_edge_metrics['object_degree'] = KGX_nodes_metrics[object]['degree']
-        KGX_edge_metrics['object_biolink_category'] = KGX_nodes_metrics[object]['biolink_category']
-        KGX_edge_metrics['object_biolink_branch'] = KGX_nodes_metrics[object]['biolink_branch']
-        KGX_edge_metrics['object_biolink_depth'] = KGX_nodes_metrics[object]['biolink_depth']
-        KGX_edge_metrics['object_name'] = KGX_nodes_metrics[object]['name']
-
-        # append predicate metrics:
-        KGX_edge_metrics['predicate'] = predicate
-        KGX_edge_metrics['predicate_biolink_branch'] = biolink_info[predicate]['biolink_branch']
-        KGX_edge_metrics['predicate_biolink_depth'] = biolink_info[predicate]['biolink_depth']
-        KGX_edge_metrics['publications'] = kgx_dict[edge_id]['publications']
-        KGX_edge_metrics['publications_number'] = len(kgx_dict[edge_id]['publications'])
-
-        KGX_metrics.append(KGX_edge_metrics)
-        # ## Flatten dict:
-        # for pub in kgx_dict[edge_id]['publications']:
-        #     KGX_edge_metrics['publications'] = pub
-        #     KGX_metrics.append(KGX_edge_metrics)
+def map_metrics_to_KGX(kgx_dict, category_mapping_dict):
+    """
+    Maps node and predicate metrics to KGX edges dynamically.
     
+    This version is modular: it preserves all original keys in kgx_dict 
+    and appends any available metrics from KGX_nodes_metrics and biolink_info
+    without needing to know the specific key names in advance.
+    """
+    # Compute metrics (Assuming this function exists as per your snippet)
+    KGX_nodes_metrics, biolink_info = KGX_node_metrics.compute_KGX_node_metrics(kgx_dict, category_mapping_dict)
+
+    KGX_metrics = []
+    total_lines = len(kgx_dict)
+
+    for edge_id, edge_data in tqdm(kgx_dict.items(), total=total_lines, desc="Mapping metrics to KGX"):
+        # 1. Start with all original keys from the kgx_dict entry
+        # We use .copy() to avoid mutating the original input dictionary
+        edge_metrics = edge_data.copy()
+        edge_metrics['id'] = edge_id
+
+        # 2. Dynamically append Subject metrics
+        subject_id = edge_data.get('subject')
+        if subject_id in KGX_nodes_metrics:
+            for key, value in KGX_nodes_metrics[subject_id].items():
+                edge_metrics[f'subject_{key}'] = value
+
+        # 3. Dynamically append Object metrics
+        object_id = edge_data.get('object')
+        if object_id in KGX_nodes_metrics:
+            for key, value in KGX_nodes_metrics[object_id].items():
+                edge_metrics[f'object_{key}'] = value
+
+        # 4. Dynamically append Predicate metrics
+        predicate = edge_data.get('predicates') if 'predicates' in edge_data else edge_data.get('predicate')
+        if predicate in biolink_info:
+            for key, value in biolink_info[predicate].items():
+                edge_metrics[f'predicate_{key}'] = value
+
+        # 5. Add derived metrics (like publications count) if the source data exists
+        if 'publications' in edge_data and isinstance(edge_data['publications'], list):
+            edge_metrics['publications_number'] = len(edge_data['publications'])
+
+        KGX_metrics.append(edge_metrics)
 
     return KGX_metrics
 
-def build_edges_test_suite(kg_path, model_results_path, strata_cols=['semantic_complexity_classes','is_hub_edge','degree_assymetry_classes','biomedical_area_pair','predicted'], sample_size=4,joined_df=[]):
+def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "publications", strata_cols=['semantic_complexity_classes','is_hub_edge','degree_assymetry_classes','biomedical_area_pair','predicted'], sample_size=4,joined_df=[]):
     """
     Builds a stratified test suite by joining exploded KG evidence 
     with ML predictions and sampling PMIDs per stratum.
@@ -264,24 +261,29 @@ def build_edges_test_suite(kg_path, model_results_path, strata_cols=['semantic_c
         # 2. Flatten (Explode) the publications
         # Each row now represents one specific PMID for a specific edge.
         # All edge-level features (complexity, etc.) are duplicated across these rows.
-        exploded_kg = kg_df.explode("publications")
-        exploded_kg = exploded_kg.rename({"subject": "subject_curie","object": "object_curie","publications": "PMID"})
+        print(f'Explode by attribute: {attribute_to_review}:')
+        exploded_kg = kg_df.explode(attribute_to_review,empty_as_null=True)
+        exploded_kg = exploded_kg.rename({"subject": "subject_curie","object": "object_curie","publications": "PMID"}) # TO DO outsource mapping file
+        print(f'Explode by attribute: {attribute_to_review}: Done.')
 
-        # 3. Load the ML Results
-        # This file must contain: ['subject', 'predicate', 'object', 'predicted']
+        # 3. Load the model results
+        # This file must contain: ['subject', 'predicate', 'object', 'predicted'] # TO DO CHECK
+        print(f'Load the model results in: {model_results_path}:')
         ml_results = pl.read_parquet(model_results_path)
+        print(f'Load the model results in: {model_results_path}: Done.')
 
         # 4. Perform the Join
         # We join on the triple identity. The 'predicted' column is brought into our exploded KG.
         # We use an 'inner' join to ensure we only test PMIDs that actually have a prediction.
+        print(f'Joining datasets:')
         joined_df = exploded_kg.join(
             ml_results, 
             on=['subject_curie', 'predicate', 'object_curie','PMID'], 
             how='inner'
         )
+        print(f'Joining datasets: Done.')
         joined_df_path = 'data/KG_metrics_LLM_Checker_results.parquet'
         joined_df.write_parquet(joined_df_path, compression='snappy')
-
         print(f"Successfully saved {len(joined_df)} edges to: {joined_df_path}")
 
 
@@ -348,26 +350,17 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     # calculate metrics and map to KGX:
     KGX_edge_metrics = map_metrics_to_KGX(kgx_dict,category_mapping_dict)
 
-    design_dict = {'id':'ignore',
-                    'subject':'ignore',
-                    'subject_degree': 'powerlaw',
-                    'subject_biolink_category':'ignore',
+    design_dict = {'subject_degree': 'powerlaw',
                     'subject_biolink_branch':'discrete',
                     'subject_biolink_depth':'discrete',
-                    'subject_name':'ignore',
-                    'object':'ignore',
                     'object_degree': 'powerlaw',
-                    'object_biolink_category':'ignore',
                     'object_biolink_branch':'discrete',
                     'object_biolink_depth':'discrete',
-                    'object_name':'ignore',
-                    'object_biolink_category':'ignore',
-                    'predicate':'ignore',
                     'predicate_biolink_branch':'discrete',
                     'predicate_biolink_depth':'discrete',
                     'publications_number':'powerlaw'
                     }
-    # metrics_transformed,sampled_data = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
+
     metrics_transformed = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
 
     kgx_metrics_parquet = 'data/KGX_computed_edges_transformed_metrics.parquet'
@@ -378,6 +371,8 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
         os.makedirs(os.path.dirname(kgx_metrics_csv), exist_ok=True)
 
         save_to_csv(metrics_transformed, kgx_metrics_csv) # save csv
+
+        # debug_arrow_schema_conflicts(metrics_transformed)
         save_to_parquet(metrics_transformed, kgx_metrics_parquet) # save parquet
 
 
@@ -391,4 +386,4 @@ if __name__ == "__main__":
     input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
     biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
     LLM_checker_results_file = 'data/LLM_Pmid_Evaluation_SemMedDB_v1.0/results.parquet'
-    main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,False)
+    main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file)
