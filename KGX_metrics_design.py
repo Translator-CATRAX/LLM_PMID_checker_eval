@@ -350,6 +350,48 @@ def feature_degree_classification(data, column_to_read, new_column_name):
 
     return data
 
+def feature_assymetry_classification(data, column_to_read, new_column_name):
+    """
+    Classifies degree asymmetry into 3 strata (Low, Medium, High) 
+    using quantiles to ensure balanced distribution for testing.
+    
+    Args:
+        data (list of dict): The KG edge dataset.
+        column_to_read (str): The key containing the asymmetry values.
+        new_column_name (str): The name of the new classification key.
+        
+    Returns:
+        list of dict: The updated dataset.
+    """
+    if not data:
+        return []
+
+    # 1. Extract all values for the calculation
+    # We use a list comprehension to grab the values, defaulting to 0 if missing
+    values = np.array([float(entry.get(column_to_read, 0)) for entry in data])
+
+    if values.size == 0:
+        return data
+
+    # 2. Calculate Quantile Boundaries
+    # We use the 25th and 75th percentiles to create 3 equal-sized groups (Tertiaries)
+    # This prevents "strata explosion" while capturing the distribution shape.
+    p25 = np.percentile(values, 25)
+    p75 = np.percentile(values, 75)
+
+    # 3. Apply classification to each entry
+    for entry in data:
+        val = float(entry.get(column_to_read, 0))
+        
+        if val <= p75:
+            label = 1   # (Moderate asymmetry)
+        else:
+            label = 2     # Top 25% (Extreme asymmetry/Outliers)
+            
+        entry[new_column_name] = label
+
+    return data
+
 def main(data,columns_type):
 
     ## reequilibrate distributions based on data type
@@ -363,7 +405,7 @@ def main(data,columns_type):
     ### structural impact:
     updated_data = feature_substract(updated_data, ['subject_degree','object_degree'], 'degree_assymetry')
     updated_data = feature_hub_classification(updated_data, ['subject_degree', 'object_degree'], 'is_hub_edge')
-    updated_data = feature_degree_classification(updated_data, 'degree_assymetry', 'degree_assymetry_classes')
+    updated_data = feature_assymetry_classification(updated_data, 'degree_assymetry', 'degree_assymetry_classes')
     
     ### vocabulary type:
     biomedical_area_headers = ['subject_biolink_branch','object_biolink_branch']
