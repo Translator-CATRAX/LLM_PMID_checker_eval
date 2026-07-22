@@ -4,7 +4,7 @@ import warnings
 from tqdm import tqdm
 import copy
 
-
+# TO DO: merge classifications into 1 method with different distributions a priori
 
 def KGX_edge_sampling(data,columns_type, sample_size=20):
     """
@@ -222,11 +222,11 @@ def compute_semantic_complexity(data):
 
 
     data_semantic_complexity = feature_product(data, semantic_complexity_headers, 'semantic_complexity')
-    data_semantic_complexity = feature_asymmetry_classification(data_semantic_complexity, 'semantic_complexity', 'semantic_complexity_classes')
+    data_semantic_complexity = feature_degree_classification(data_semantic_complexity, 'semantic_complexity', 'semantic_complexity_classes')
 
     return data_semantic_complexity
 
-def feature_degree_classification(data, columns_to_consider, new_column_name):
+def feature_hub_classification(data, columns_to_consider, new_column_name):
     """
     Identifies if an edge contains at least one 'Extreme High' (Class 2) node.
     
@@ -306,7 +306,7 @@ def feature_biomedical_area(data, columns_to_consider, new_column_name):
 
     return data
 
-def feature_asymmetry_classification(data, column_to_read, new_column_name):
+def feature_degree_classification(data, column_to_read, new_column_name):
     """
     Classifies degree asymmetry into 3 strata (Low, Medium, High) 
     using quantiles to ensure balanced distribution for testing.
@@ -362,7 +362,8 @@ def main(data,columns_type):
 
     ### structural impact:
     updated_data = feature_substract(updated_data, ['subject_degree','object_degree'], 'degree_assymetry')
-    updated_data = feature_degree_classification(updated_data, ['subject_degree', 'object_degree'], 'is_hub_edge')
+    updated_data = feature_hub_classification(updated_data, ['subject_degree', 'object_degree'], 'is_hub_edge')
+    updated_data = feature_degree_classification(updated_data, 'degree_assymetry', 'degree_assymetry_classes')
     
     ### vocabulary type:
     biomedical_area_headers = ['subject_biolink_branch','object_biolink_branch']
