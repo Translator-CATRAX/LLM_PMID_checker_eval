@@ -294,19 +294,28 @@ def build_edges_test_suite(kg_path, model_results_path, strata_cols=['semantic_c
     # Identify grouping columns: perform stratified sampling using window functions
     test_suite = (
         joined_df
-        # Optional: Handle nulls in strata columns so they don't create 'null' groups
-        # We replace null with a placeholder like -1 or "Unknown"
+        # 1. Handle Nulls first so they don't break the string concatenation
         .with_columns([
             pl.col(c).fill_null(strategy="zero") if joined_df[c].dtype.is_integer() 
             else pl.col(c).fill_null("Unknown") 
             for c in strata_cols
         ])
-        .with_columns(
-            # Create a running count within each unique combination of types
-            strata_id = pl.int_range(0, pl.len()).over(strata_cols)
-        )
-        # Keep only the first 20 samples per stratum
-        .filter(pl.col("strata_id") < sample_size)
+        .with_columns([
+            # 2. Create the 'strata_id' (The human-readable ID)
+            # This joins all features into one string: "Class1 | True | Class0 | AreaA"
+            pl.concat_str(
+                [pl.col(c).cast(pl.Utf8) for c in strata_cols], 
+                separator=" | "
+            ).alias("strata_id"),
+
+            # 3. Create the 'group_idx' (The mathematical counter used for filtering)
+            # This is the part that resets to 0, 1, 2... for every group
+            pl.int_range(0, pl.len()).over(strata_cols).alias("group_idx")
+        ])
+        # 4. Filter using the counter
+        .filter(pl.col("group_idx") < sample_size)
+        # 5. Drop the counter so you only see the human-readable ID in your final CSV
+        .drop("group_idx")
     )
 
     test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_{sample_size}.parquet'
@@ -373,9 +382,9 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
 
 
     ## Compute test suite with stratified sampling:
-    test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file, sample_size=20)
+    test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file)
 
-    return metrics_transformed
+    return test_suite
 
 if __name__ == "__main__":
     # load data (TO BE UPDATED AFTER AUTOMATION):
