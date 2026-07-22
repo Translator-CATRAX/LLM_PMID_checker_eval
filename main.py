@@ -243,7 +243,7 @@ def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
 
     return KGX_metrics
 
-def build_edges_test_suite(kg_path, ml_results_path, sample_size=20):
+def build_edges_test_suite(kg_path, model_results_path, strata_cols=['semantic_complexity_classes','is_hub_edge','degree_assymetry_classes','biomedical_area_pair','predicted'], sample_size=4,joined_df=[]):
     """
     Builds a stratified test suite by joining exploded KG evidence 
     with ML predictions and sampling PMIDs per stratum.
@@ -256,46 +256,67 @@ def build_edges_test_suite(kg_path, ml_results_path, sample_size=20):
     Returns:
         pl.DataFrame: The final sampled test suite.
     """
+    if len(joined_df) == 0:
+        # 1. Load the KG Data (Object A)
+        # This contains your features: complexity, asymmetry, is_hub_edge, etc.
+        kg_df = pl.read_parquet(kg_path)
+
+        # 2. Flatten (Explode) the publications
+        # Each row now represents one specific PMID for a specific edge.
+        # All edge-level features (complexity, etc.) are duplicated across these rows.
+        exploded_kg = kg_df.explode("publications")
+        exploded_kg = exploded_kg.rename({"subject": "subject_curie","object": "object_curie","publications": "PMID"})
+
+        # 3. Load the ML Results
+        # This file must contain: ['subject', 'predicate', 'object', 'predicted']
+        ml_results = pl.read_parquet(model_results_path)
+
+        # 4. Perform the Join
+        # We join on the triple identity. The 'predicted' column is brought into our exploded KG.
+        # We use an 'inner' join to ensure we only test PMIDs that actually have a prediction.
+        joined_df = exploded_kg.join(
+            ml_results, 
+            on=['subject_curie', 'predicate', 'object_curie','PMID'], 
+            how='inner'
+        )
+        joined_df_path = 'data/KG_metrics_LLM_Checker_results.parquet'
+        joined_df.write_parquet(joined_df_path, compression='snappy')
+
+        print(f"Successfully saved {len(joined_df)} edges to: {joined_df_path}")
+
+
+    # 5. Stratified sampling: identify all columns that define the strata from strata_cols 
+    # Shuffle the entire DataFrame first
+    # This ensures that when we pick the "top 20" from a group, 
+    # they are random and not just the first 20 encountered in the original file (which is definitely NOR random).
+    joined_df = joined_df.sample(fraction=1.0, shuffle=True)
     
-    # 1. Load the KG Data (Object A)
-    # This contains your features: complexity, asymmetry, is_hub_edge, etc.
-    kg_df = pl.read_parquet(kg_path)
-
-    # 2. Flatten (Explode) the publications
-    # Each row now represents one specific PMID for a specific edge.
-    # All edge-level features (complexity, etc.) are duplicated across these rows.
-    exploded_kg = kg_df.explode("publications")
-
-    # 3. Load the ML Results
-    # This file must contain: ['subject', 'predicate', 'object', 'predicted']
-    ml_results = pl.read_parquet(ml_results_path)
-
-    # 4. Perform the Join
-    # We join on the triple identity. The 'predicted' column is brought into our exploded KG.
-    # We use an 'inner' join to ensure we only test PMIDs that actually have a prediction.
-    joined_df = exploded_kg.join(
-        ml_results, 
-        on=['subject', 'predicate', 'object'], 
-        how='inner'
-    )
-
-    # 5. Stratified Sampling
-    # We identify all columns that define our 'strata' (everything except the unique ID and PMID)
-    # We group by these strata and take the first N PMIDs found in each group.
-    
-    # Identify grouping columns: everything except 'id' and 'publications'
-    group_cols = [
-        col for col in joined_df.columns 
-        if col not in ['id', 'publications', 'predicted']
-    ]
-
-    # Perform the sampling
-    # .head(sample_size) is extremely fast in Polars for this purpose.
+    # Identify grouping columns: perform stratified sampling using window functions
     test_suite = (
         joined_df
-        .group_by(group_cols)
-        .head(sample_size)
+        # Optional: Handle nulls in strata columns so they don't create 'null' groups
+        # We replace null with a placeholder like -1 or "Unknown"
+        .with_columns([
+            pl.col(c).fill_null(strategy="zero") if joined_df[c].dtype.is_integer() 
+            else pl.col(c).fill_null("Unknown") 
+            for c in strata_cols
+        ])
+        .with_columns(
+            # Create a running count within each unique combination of types
+            strata_id = pl.int_range(0, pl.len()).over(strata_cols)
+        )
+        # Keep only the first 20 samples per stratum
+        .filter(pl.col("strata_id") < sample_size)
     )
+
+    test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_{sample_size}.parquet'
+    test_suite.write_parquet(test_suite_path_parquet, compression='snappy')
+    print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_parquet}")
+
+    test_suite_path_csv = f'data/KG_metrics_LLM_Checker_results_test_suite_{sample_size}.csv'
+    test_suite.write_csv(test_suite_path_csv)
+    print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_csv}")
+
 
     return test_suite
 
@@ -313,7 +334,6 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
         sys.exit(1)
 
     kgx_dict = read_KGX(input_KGX_file)
-    # kgx_parquet = read_KGX_to_parquet(input_KGX_file)
     category_mapping_dict = read_KGX_category_mapping(biolink_id_to_category_mapping)
 
     # calculate metrics and map to KGX:
@@ -341,23 +361,19 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     # metrics_transformed,sampled_data = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
     metrics_transformed = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
 
-    output_file_parquet = 'data/KGX_computed_edges_transformed_metrics.parquet'
-    output_file_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
+    kgx_metrics_parquet = 'data/KGX_computed_edges_transformed_metrics.parquet'
+    kgx_metrics_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
     if save_files:
         print('Save transformed metrics:')
-        os.makedirs(os.path.dirname(output_file_parquet), exist_ok=True)
-        os.makedirs(os.path.dirname(output_file_csv), exist_ok=True)
+        os.makedirs(os.path.dirname(kgx_metrics_parquet), exist_ok=True)
+        os.makedirs(os.path.dirname(kgx_metrics_csv), exist_ok=True)
 
-        save_to_csv(metrics_transformed, output_file_csv) # save csv
-        save_to_parquet(metrics_transformed, output_file_parquet) # save parquet
+        save_to_csv(metrics_transformed, kgx_metrics_csv) # save csv
+        save_to_parquet(metrics_transformed, kgx_metrics_parquet) # save parquet
 
 
-
-    ## JOINTURE AVEC RESULTS
-    #### Transform metrics_transformed into pl format
-    LLM_checker_dataset = pl.read_parquet(LLM_checker_results_file)
-    KGX_metrics_dataset = pl.read_parquet(LLM_checker_results_file)
-
+    ## Compute test suite with stratified sampling:
+    test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file, sample_size=20)
 
     return metrics_transformed
 
