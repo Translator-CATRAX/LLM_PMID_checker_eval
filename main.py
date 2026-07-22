@@ -7,6 +7,8 @@ from tqdm import tqdm
 import sys
 import re
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 def read_KGX(input_KGX_file,headers_of_interest = ['subject','object','predicate','publications']):
@@ -164,31 +166,36 @@ def save_to_csv(data, output_file):
 
 def save_to_parquet(updated_data, output_file_path):
     """
-    Converts a list of dictionaries (KG edges) into a Polars DataFrame
-    and saves it as a high-performance Parquet file.
+    Optimized conversion of a large list of dictionaries to Parquet.
+    Uses PyArrow's C++ implementation to avoid Python-level iteration overhead.
     
     Args:
-        updated_data (list of dict): The KG edge data with all computed features.
-        output_template (str): The destination path (e.g., 'processed_kg.parquet').
+        updated_data (list of dict): The KG edge data (1M+ rows).
+        output_file_path (str): Destination path.
     """
     if not updated_data:
         print("Error: The data list is empty. Nothing to save.")
         return
 
     try:
-        # 1. Convert the list of dictionaries directly to a Polars DataFrame
-        # Polars is highly optimized for this conversion.
-        df = pl.DataFrame(updated_data)
+        print(f"Starting conversion of {len(updated_data)} rows...")
 
-        # 2. Write to Parquet
-        # We use compression='snappy' (default) which provides a great balance 
-        # between file size and read/write speed.
-        df.write_parquet(output_file_path, compression="snappy")
-        
-        print(f"Successfully saved {len(df)} edges to: {output_file_path}")
-        
+        # 1. Use PyArrow to convert the list of dicts directly to a Table.
+        # 'from_pylist' is implemented in C++ and is significantly faster 
+        # and more memory-efficient than Polars or Pandas for this specific input type.
+        table = pa.Table.from_pylist(updated_data)
+
+        # 2. Write the Arrow Table directly to Parquet.
+        # We skip the step of converting to Polars entirely to save memory.
+        # Writing via PyArrow is the industry standard for high-performance Parquet.
+        pq.write_table(table, output_file_path, compression='snappy')
+
+        print(f"Successfully saved {len(updated_data)} edges to: {output_file_path}")
+
     except Exception as e:
-        print(f"Failed to save Parquet file. Error: {e}")
+        print(f"An error occurred during saving: {e}")
+        raise
+
 
 def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
     # Compute metrics:
@@ -224,12 +231,14 @@ def map_metrics_to_KGX(kgx_dict,category_mapping_dict):
         KGX_edge_metrics['predicate'] = predicate
         KGX_edge_metrics['predicate_biolink_branch'] = biolink_info[predicate]['biolink_branch']
         KGX_edge_metrics['predicate_biolink_depth'] = biolink_info[predicate]['biolink_depth']
+        KGX_edge_metrics['publications'] = kgx_dict[edge_id]['publications']
         KGX_edge_metrics['publications_number'] = len(kgx_dict[edge_id]['publications'])
 
-        ## Flatten dict:
-        for pub in kgx_dict[edge_id]['publications']:
-            KGX_edge_metrics['publications'] = pub
-            KGX_metrics.append(KGX_edge_metrics)
+        KGX_metrics.append(KGX_edge_metrics)
+        # ## Flatten dict:
+        # for pub in kgx_dict[edge_id]['publications']:
+        #     KGX_edge_metrics['publications'] = pub
+        #     KGX_metrics.append(KGX_edge_metrics)
     
 
     return KGX_metrics
@@ -332,48 +341,29 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     # metrics_transformed,sampled_data = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
     metrics_transformed = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
 
+    output_file_parquet = 'data/KGX_computed_edges_transformed_metrics.parquet'
+    output_file_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
+    if save_files:
+        print('Save transformed metrics:')
+        os.makedirs(os.path.dirname(output_file_parquet), exist_ok=True)
+        os.makedirs(os.path.dirname(output_file_csv), exist_ok=True)
 
+        save_to_csv(metrics_transformed, output_file_csv) # save csv
+        save_to_parquet(metrics_transformed, output_file_parquet) # save parquet
 
 
 
     ## JOINTURE AVEC RESULTS
     #### Transform metrics_transformed into pl format
-    df = pl.read_parquet(LLM_checker_results_file)
+    LLM_checker_dataset = pl.read_parquet(LLM_checker_results_file)
+    KGX_metrics_dataset = pl.read_parquet(LLM_checker_results_file)
 
 
-
-    if save_files:
-        output_file_json = 'data/KGX_computed_edges_metrics.json'
-        output_file_csv = 'data/KGX_computed_edges_metrics.csv'
-        print('save transformed metrics:') ############### TO CHANGE INTO parquet format
-        os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
-        
-        # Sauvegarde JSON
-        # with open(output_file_json, 'w', encoding='utf-8') as f:
-        #     json.dump(KGX_edge_metrics, f, indent=4)
-        # print(f"Fichier JSON sauvegardé : {output_file_json}")
-
-        # Sauvegarde CSV
-        save_to_csv(KGX_edge_metrics, output_file_csv)
-
-        print('save transformed metrics:')
-        output_file_json = 'data/KGX_computed_edges_transformed_metrics.json'
-        output_file_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
-        os.makedirs(os.path.dirname(output_file_json), exist_ok=True)
-        
-        # Sauvegarde JSON
-        # with open(output_file_json, 'w', encoding='utf-8') as f:
-        #     json.dump(metrics_transformed, f, indent=4)
-        # print(f"Fichier JSON sauvegardé : {output_file_json}")
-
-        # Sauvegarde CSV
-        save_to_csv(metrics_transformed, output_file_csv)
-
-    return sampled_data
+    return metrics_transformed
 
 if __name__ == "__main__":
     # load data (TO BE UPDATED AFTER AUTOMATION):
     input_KGX_file = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/normalized_edges.jsonl'
     biolink_id_to_category_mapping = 'data/kg2.10.3_semmeddb_dogpark_uncapped_2026_04_07/transform_892b6acb/normalization_2025sep1/merged_nodes.jsonl'
     LLM_checker_results_file = 'data/LLM_Pmid_Evaluation_SemMedDB_v1.0/results.parquet'
-    main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,save_files = False)
+    main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,False)
