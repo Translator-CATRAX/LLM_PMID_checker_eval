@@ -217,6 +217,60 @@ def feature_substract(data, columns_to_substract, new_column_name):
             
     return data
 
+def composite_feature_structural_impact(data, new_column_name):
+    """
+    Merge structural features in 1 (first key minus second key) of values 
+    found in specific keys within a list of dictionaries.
+    
+    Args:
+        data (list of dict): The dataset containing the edge attributes.
+        new_column_name (str): The name of the new key to store the result in.
+        
+    Returns:
+        list of dict: The updated dataset with the new subtraction key.
+    """
+
+    columns_to_combine = ['is_hub_edge','degree_assymetry_classes']
+
+    # Safety check: Ensure we have at least two keys to perform subtraction
+    if len(columns_to_combine) < 2:
+        raise ValueError("Subtraction requires at least two keys in columns_to_combine.")
+
+    key1 = columns_to_combine[0]
+    key2 = columns_to_combine[1]
+
+    for entry in data:
+        # Retrieve values, defaulting to None if key is missing
+        val1 = entry.get(key1)
+        val2 = entry.get(key2)
+        
+        # Check if both values exist and are numeric
+        if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
+            # Isolated – 0 0 or 1 0
+            # Asymetric – 1 1
+            # Dense cluster – 0 1
+            if val1 == 1 and val2 == 1:
+                entry[new_column_name] = "Asymetric"
+            if val1 == 0 and val2 == 1:
+                entry[new_column_name] = "Dense cluster"
+            else:
+                entry[new_column_name] = "Isolated"
+
+        else:
+            # If a value is missing or is a string (like a branch name), 
+            # we set the result to 0.0 and log a warning.
+            entry[new_column_name] = None
+            
+            # Detailed error reporting for debugging your test suite
+            if val1 is None or val2 is None:
+                print(f"Warning: Missing key in entry {entry.get('id', 'unknown')}. "
+                      f"({key1}: {val1}, {key2}: {val2})")
+            elif not isinstance(val1, (int, float)) or not isinstance(val2, (int, float)):
+                print(f"Warning: Non-numeric value in entry {entry.get('id', 'unknown')}. "
+                      f"({key1}: {type(val1).__name__}, {key2}: {type(val2).__name__})")
+            
+    return data
+
 def compute_semantic_complexity(data):
     semantic_complexity_headers = ['subject_biolink_depth','object_biolink_depth','predicate_biolink_depth']
 
@@ -383,13 +437,23 @@ def feature_assymetry_classification(data, column_to_read, new_column_name):
         val = float(entry.get(column_to_read, 0))
         
         if val <= p75:
-            label = 1   # (Moderate asymmetry)
+            label = 0   # (Moderate asymmetry)
         else:
-            label = 2     # Top 25% (Extreme asymmetry/Outliers)
+            label = 1     # Top 25% (Extreme asymmetry/Outliers)
             
         entry[new_column_name] = label
 
     return data
+
+def compute_structural_impact(data):
+
+    updated_data = feature_substract(data, ['subject_degree','object_degree'], 'degree_assymetry')
+    updated_data = feature_hub_classification(updated_data, ['subject_degree', 'object_degree'], 'is_hub_edge')
+    updated_data = feature_assymetry_classification(updated_data, 'degree_assymetry', 'degree_assymetry_classes')
+    updated_data = composite_feature_structural_impact(updated_data, 'structural_composite')
+    
+    return updated_data
+
 
 def main(data,columns_type):
 
@@ -400,11 +464,8 @@ def main(data,columns_type):
     ### semantic complexity
     updated_data = compute_semantic_complexity(updated_data) # one-sided from normal around 0
     
-
     ### structural impact:
-    updated_data = feature_substract(updated_data, ['subject_degree','object_degree'], 'degree_assymetry')
-    updated_data = feature_hub_classification(updated_data, ['subject_degree', 'object_degree'], 'is_hub_edge')
-    updated_data = feature_assymetry_classification(updated_data, 'degree_assymetry', 'degree_assymetry_classes')
+    updated_data = compute_structural_impact(updated_data)
     
     ### vocabulary type:
     biomedical_area_headers = ['subject_biolink_branch','object_biolink_branch']
