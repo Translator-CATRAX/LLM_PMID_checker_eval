@@ -13,6 +13,7 @@ import time
 import math
 from tqdm import tqdm
 from typing import Union, List
+import hashlib
 
 
 def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject','subject_form_or_variant_qualifier','object','original_object','object_aspect_prefix','object_direction_qualifier','predicate','qualified_predicate','publications']):
@@ -323,15 +324,6 @@ def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "p
         .drop("group_idx")
     )
 
-    test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_{sample_size}.parquet'
-    test_suite.write_parquet(test_suite_path_parquet, compression='snappy')
-    print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_parquet}")
-
-    test_suite_path_csv = f'data/KG_metrics_LLM_Checker_results_test_suite_{sample_size}.csv'
-    test_suite.write_csv(test_suite_path_csv)
-    print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_csv}")
-
-
     return test_suite
 
 def add_pubmed_links(df):                                                                                             
@@ -374,6 +366,7 @@ def add_mapping(df):
             separator=" -- "
         ).alias("edge type (spo category)")
     )
+
 
 def create_mapped_eval_template_csv(
     test_suite: pl.DataFrame,
@@ -645,6 +638,17 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     test_suite = add_biolink_links(test_suite)
     test_suite = add_mapping(test_suite)
     test_suite = enrich_test_suite_with_synonyms(test_suite=test_suite,column_to_search=["subject_curie", "object_curie"],column_to_create=["subject label synonyms", "object label synonyms"],service_name="edge-test-suite")
+    
+    if save_files:
+        print('Saving test suite')
+        test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_samplesize4.parquet'
+        test_suite.write_parquet(test_suite_path_parquet, compression='snappy')
+        print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_parquet}")
+
+        test_suite_path_csv = f'data/KG_metrics_LLM_Checker_results_test_suite_samplesize4.csv'
+        test_suite.write_csv(test_suite_path_csv)
+        print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_csv}")
+    
 
     # Creating evaluation sheets
     config_eval_json_path = "config_mapping.json"
