@@ -719,6 +719,8 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     # Creating evaluation sheets
     config_eval_json_path = "config_curator_sheet.json"
     create_mapped_eval_template_csv(test_suite,config_eval_json_path,"data/evaluation_sheet.csv")
+    config_eval_json_path = "config_validation_sheet.json"
+    create_mapped_eval_template_csv(test_suite,config_eval_json_path,"data/validation_sheet.csv")
 
     return test_suite
 

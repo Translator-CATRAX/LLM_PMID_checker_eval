@@ -1,0 +1,35 @@
+{
+  "row1": [
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "ARAX TOOL OUTCOME (hidden from reviewer)",
+    "REVIEWER NOTES/FEEDBACK",
+    "FINAL OUTCOME (will be completed and analyzed after the review)",
+    "FINAL OUTCOME (will be completed and analyzed after the review)"
+  ],
+  "row2": [
+    "pair ID",
+    "subject identified correctly (y/n)",
+    "object identified correctly (y/n)",
+    "relationship/triple extracted from snippet correctly (y/n)",
+    "arax tool snippet",
+    "arax tool reasoning",
+    "arax tool \"support\"",
+    "reviewer notes (insights, questions, feedback)",
+    "classification(tp, fp, tn, fn)",
+    "notes"
+  ],
+  "mapping_to_test_suite": {
+    "pair ID": "id",
+    "subject identified correctly (y/n)": "subject_mentioned",
+    "object identified correctly (y/n)": "object_mentioned",
+    "relationship/triple extracted from snippet correctly (y/n)": "predicted",
+    "arax tool snippet": "supporting_sentences",
+    "arax tool reasoning": "reasoning",
+    "arax tool \"support\"": "support"
+  }
+}
