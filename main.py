@@ -5,13 +5,17 @@ import json
 import csv
 from tqdm import tqdm
 import sys
-import re
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
+import requests
+import time
+import math
+from tqdm import tqdm
+from typing import Union, List
 
 
-def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject','subject_form_or_variant_qualifier','object','original_object','object_aspect_qualifier','object_direction_qualifier','predicate','qualified_predicate','publications']):
+def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject','subject_form_or_variant_qualifier','object','original_object','object_aspect_prefix','object_direction_qualifier','predicate','qualified_predicate','publications']):
     # need to verify that data['id'] is unique
     kgx_dict = dict()
      
@@ -25,7 +29,6 @@ def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject',
             try:
                 data = json.loads(line)
                 if 'id' in data.keys():
-                    additional_data = dict()
                     kgx_dict[data['id']] = dict()
                     for h in headers_of_interest: # init
                         kgx_dict[data['id']][h] = None
@@ -44,7 +47,7 @@ def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject',
 def read_KGX_to_parquet(input_KGX_file):
     """
     Reads a JSONL KGX file and writes a flattened Parquet file.
-    Every key in the original JSON becomes a column in the Parquet file.
+    Every key in the original JSON becomes a column in the Parparquet file.
     The 'publications' list is exploded into multiple rows based on PMID.
     """
     # We use a temporary JSONL to avoid keeping everything in RAM
@@ -87,9 +90,8 @@ def read_KGX_to_parquet(input_KGX_file):
                         flat_record['PMID'] = pmid
                         f_out.write(json.dumps(flat_record) + '\n')
 
-            except (json.JSONDecoderonError, KeyError) as e:
-                # It's better to see what went wrong during debugging
-                # print(f"Error processing line: {e}")
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Error processing line: {e}")
                 continue
 
     # 3. Conve6rt the flattened JSONL into a high-performance Parquet
@@ -108,7 +110,7 @@ def read_KGX_to_parquet(input_KGX_file):
         return output_parquet_file
 
     except Exception as e:
-        print(f"Error during Polars conversion: {e}")
+        print(int(f"Error during Polars conversion: {e}"))
         if os.path.exists(temp_flat_jsonl):
             os.remove(temp_flat_jsonl)
         raise
@@ -185,7 +187,7 @@ def save_to_parquet(updated_data, output_file_path):
 
         # 2. Write the Arrow Table directly to Parquet.
         # We skip the step of converting to Polars entirely to save memory.
-        # Writing via PyArrow is the industry standard for high-performance Parquet.
+        # Writing via PyArrow is the industry standard for high-performance Parint.
         pq.write_table(table, output_file_path, compression='snappy')
 
         print(f"Successfully saved {len(updated_data)} edges to: {output_file_path}")
@@ -220,7 +222,7 @@ def map_metrics_to_KGX(kgx_dict, category_mapping_dict):
             for key, value in KGX_nodes_metrics[subject_id].items():
                 edge_metrics[f'subject_{key}'] = value
 
-        # 3. Dynamically append Object metrics
+        # 3. Dynamly append Object metrics
         object_id = edge_data.get('object')
         if object_id in KGX_nodes_metrics:
             for key, value in KGX_nodes_metrics[object_id].items():
@@ -276,11 +278,12 @@ def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "p
         # We join on the triple identity. The 'predicted' column is brought into our exploded KG.
         # We use an 'inner' join to ensure we only test PMIDs that actually have a prediction.
         print(f'Joining datasets:')
-        joined_df = exploded_kg.join(
+        joined_rag = exploded_kg.join(
             ml_results, 
             on=['subject_curie', 'predicate', 'object_curie','PMID'], 
             how='inner'
         )
+        joined_df = joined_rag
         print(f'Joining datasets: Done.')
         joined_df_path = 'data/KG_metrics_LLM_Checker_results.parquet'
         joined_df.write_parquet(joined_df_path, compression='snappy')
@@ -333,10 +336,10 @@ def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "p
 
 def add_pubmed_links(df):                                                                                             
     """                                                                                                               
-    Adds a 'link to abstract' column by transforming the PMID column.                                                 
+    Adds a 'link to abstract' column by transforming the PMID column.                                                               
     Removes 'PMID:' prefix and prepends the PubMed URL.                                                               
     """                                                                                                               
-    return df.with_columns(                                                                                           
+    return df.with_columns(                                                                                                                          
         pl.format("https://pubmed.ncbi.nlm.nih.gov/{}",                                                               
                   pl.col("PMID").str.replace("^PMID:", "")).alias("link to abstract")) 
 
@@ -345,18 +348,249 @@ def add_biolink_links(df):
     Adds a 'predicate definition' column by transforming the predicate column.                                                 
     Removes 'biolink:' prefix and prepends the biolink URL.                                                               
     """                                                                                                               
-    return df.with_columns(                                                                                           
-        pl.format("https://biolink.github.io/biolink-model/{}",                                                               
+    return df.with_columns(                                                                                                                          
+        pl.format("https://biolink.github.io/biolink-model/{}",                                                                                              
                   pl.col("predicate").str.replace("^biolink:", "")).alias("predicate definition")) 
 
 def add_mapping(df):                                                                                             
     """                                                                                                               
-    Adds a 'edge type (spo category)' column by transforming the 'subject_biolink_category'  'predicate'  'object_biolink_category' columns.                                                 
-    Removes 'biolink:' prefix and prepends the biolink URL.                                                               
+    Adds a 'edge type (spo category)' column by transforming the 'subject_biint_category', 
+    'predicate', 'qualified_predicate', and 'object_biolink_category' columns.
+    The values are stripped of the 'biolink:' prefix, and nulls in 'qualified_predicate' are replaced by 'n/a'.
     """                                                                                                               
-    return df.with_columns(                                                                                           
-        pl.format("https://biolink.github.io/biolink-model/{}",                                                               
-                  pl.col("predicate").str.replace("^biolink:", "")).alias("edge type (spo category)")) 
+    return df.with_columns([
+        pl.col("subject_biolink_category").str.replace("^biolink:", ""),
+        pl.col("predicate").str.replace("^biolink:", ""),
+        pl.col("qualified_predicate").str.replace("^biolink:", "").fill_null("n/a"),
+        pl.col("object_biolink_category").str.replace("^biolink:", "")
+    ]).with_columns(
+        pl.concat_str(
+            [
+                pl.col("subject_biolink_category"),
+                pl.col("predicate"),
+                pl.col("qualified_predicate"),
+                pl.col("object_biolink_category")
+            ],
+            separator=" -- "
+        ).alias("edge type (spo category)")
+    )
+
+def create_mapped_eval_template_csv(
+    test_suite: pl.DataFrame,
+    mapping_json_path: str,
+    output_path: str
+):
+    """
+    Creates a CSV file where:
+    - Row 1 & 2 are taken directly from the JSON blueprint.
+    - Row 3 contains the names of the test_suite columns that map to Row 2.
+    - Subsequent rows contain the actual data from the test_suite.
+
+    Args:
+        test_suite: The Polars DataFrame containing the source data.
+        mapping_json_path: Path to JSON with 'row1', 'row2', and 'mapping_to_test_suite'.
+                           Mapping format: { "template_header": "test_suite_column" }
+        output_path: Path where the resulting CSV will be saved.
+    """
+    
+    # 1. Load the configuration from JSON
+    with open(mapping_json_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    row1_template = config["row1"]
+    row2_template = config["  row2" if "  row2" in config else "row2"] # Robustness check
+    # Note: Using the exact key from your provided JSON
+    row2_template = config["row2"]
+    mapping = config["mapping_to_test_suite"]
+
+    num_cols = len(row2_template)
+    
+    # 2. Prepare structures for the output
+    # row3 will hold the names of the test_suite columns (the values from our mapping)
+    row3_values = [""] * num_cols
+    
+    # We use a list of lists to store data for each column index in the template
+    # This ensures we maintain the exact width and order of row2
+    data_columns: List[List[str]]  = [[] for _ in range(num_cols)]
+
+    # Create a lookup for row2 values to find their index quickly
+    # We use a list of indices to handle potential duplicate headers if they exist
+    col_name_to_indices = {}
+    for idx, name in enumerate(row2_template):
+        if name not in col_name_to_indices:
+            col_name_to_indices[name] = []
+        col_name_to_indices[name].append(idx)
+
+    # 3. Perform the mapping and populate data
+    # In your JSON, 'template_header' is the KEY, 'test_suite_col' is the VALUE
+    for template_header, test_suite_col in mapping.items():
+        if template_header in col_name_to_indices:
+            # We map to all indices where this header appears (usually just one)
+            for idx in col_name_to_indices[template_header]:
+                
+                if test_suite_col in test_suite.columns:
+                    # Row 3 gets the name of the source column from the test_suite
+                    row3_values[idx] = test_suite_col
+                    
+                    # Fill the data rows with values from test_suite (cast to string)
+                    data_columns[idx] = test_suite[test_suite_col].cast(pl.Utf8).to_list()
+                else:
+                    print(f"Warning: Source column '{test_suite_col}' not found in test_suite.")
+        else:
+            print(f"Warning: Template header '{template_header}' not found in JSON row2.")
+
+    # 4. Construct the CSV content line by line
+    output_lines = []
+
+    def format_line(values: List[str]) -> str:
+        # Join with semicolon; handle None/Null as empty string
+        return ";".join([str(v) if v is not None else "" for v in values])
+
+    # Add Row 1 (Metadata from JSON)
+    output_lines.append(format_line(row1_template))
+    
+    # Add Row 2 (Template Headers from JSON)
+    output_lines.append(format_line(row2_template))
+    
+    # Add Row 3 (The test_suite column names aligned to the template indices)
+    output_lines.append(format_line(row3_values))
+
+    # 5. Add Data Rows (Row 4 onwards)
+    # We iterate through the number of rows in the test_suite
+    for r in range(test_suite.height):
+        current_row_data = []
+        for c in range(num_cols):
+            # If this column has data and we haven't exceeded its length, grab it
+            if r < len(data_columns[c]):
+                val = data_columns[c][r]
+                current_row_data.append(val if val is not None else "")
+            else:
+                # If the column is empty or shorter than others, use empty string
+                current_row_data.append("")
+        output_lines.append(";".join(current_row_data))
+
+    # 6. Write to file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(output_lines))
+    
+    print(f"Successfully created: {output_path}")
+
+def enrich_test_suite_with_synonyms(
+    test_suite: pl.DataFrame,
+    column_to_search: Union[str, List[str]],
+    column_to_create: Union[str, List[str]],
+    service_name: str = "edge-test-suite",
+    batch_size: int = 100,
+    delay_seconds: float = 1.0
+) -> pl.DataFrame:
+    """
+    Enriches a Polars DataFrame by calling an external API. 
+    The service_name is injected into HTTP headers for OTEL/Telemetry tracking.
+
+    Args:
+        test_suite: The Polars DataFrame to update.
+        column_to_search: Single column name or list of names containing CURIEs.
+        column_to_create: Single column name or list of names for the new fields.
+        service_name: Name of the service (injected into User-Agent and X-Service-Name headers).
+        batch_size: Number of items per API request.
+        delay_seconds: Seconds to wait between requests to prevent rate limiting.
+
+    Returns:
+        A Polars DataFrame with the newly created synonym columns added.
+    """
+    
+    # 1. Normalize inputs (Handle single string vs list)
+    search_cols = [column_to_search] if isinstance(column_to_search, str) else column_to_search
+    create_cols = [column_to_create] if isinstance(column_to_create, str) else column_to_create
+
+    if len(search_cols) != len(create_cols):
+        raise ValueError("The number of search columns must match the number of creation columns.")
+
+    # 2. Setup API Headers for Telemetry/OTEL tracking
+    url = 'https://name-lookup.ci.transltr.io/synonyms'
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-Service-Name': service_name, 
+        'User-Agent': f'{service_name}/1.0 (Polars Enrichment Script)'
+    }
+
+    # 3. Prepare work units and calculate total progress for tqdm
+    all_work_units = []
+    total_batches_to_run = 0
+
+    for s_col in search_cols:
+        if s_col not in test_suite.columns:
+            raise ValueError(f"Source column '{s_col}' not found in DataFrame.")
+        
+        # Extract unique values to minimize API calls
+        unique_vals = (
+            test_suite.select(s_col)
+            .drop_nulls()
+            .unique()
+            .to_series()
+            .to_list()
+        )
+        
+        batches_for_this_col = math.ceil(len(unique_vals) / batch_size) if unique_vals else 0
+        total_batches_to_run += batches_for_this_col
+        all_work_units.append((s_col, unique_vals))
+
+    # 4. Execute API calls with progress bar
+    global_synonym_map = {}
+    
+    pbar = tqdm(total=total_batches_to_run, desc=f"[{service_name}] API Enrichment")
+
+    for s_col, unique_vals in all_work_units:
+        if not unique_vals:
+            continue
+
+        for i in range(0, len(unique_vals), batch_size):
+            batch = unique_vals[i : i + batch_size]
+            payload = {"preferred_curies": [str(v) for v in batch]}
+
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+
+                # Parse the response
+                for curie, info in data.items():
+                    if "names" in info:
+                        # Format as requested: "name1", "name2", "name3"
+                        formatted_names = ", ".join([f'"{n}"' for n in info["names"]])
+                        global_synonym_map[(s_col, curie)] = formatted_names
+                    else:
+                        global_syn_map_val = "" # placeholder logic
+                        global_synonym_map[(s_col, curie)] = ""
+
+            except Exception as e:
+                print(f"\n[{service_name}] Error in batch for {s_col}: {e}")
+
+            pbar.update(1)
+            if i + batch_size < len(unique_vals):
+                time.sleep(delay_seconds)
+
+    pbar.close()
+
+    # 5. Map results back to the DataFrame
+    updated_df = test_suite
+    for s_col, c_col in zip(search_cols, create_cols):
+        
+        def lookup_logic(val):
+            if val is None:
+                return ""
+            # Lookup using the (column_name, value) tuple to prevent cross-column collision
+            return global_synonym_map.get((s_col, str(val)), "")
+
+        updated_df = updated_df.with_columns(
+            pl.col(s_col)
+            .map_elements(lookup_logic, return_dtype=pl.Utf8)
+            .alias(c_col)
+        )
+
+    print(f"[{service_name}] Enrichment complete.")
+    return updated_df
 
 def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,save_files = True):
 
@@ -391,7 +625,7 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     metrics_transformed = KGX_metrics_design.main(KGX_edge_metrics,design_dict)
 
     kgx_metrics_parquet = 'data/KGX_computed_edges_transformed_metrics.parquet'
-    kgx_metrics_csv = 'data/KGX_computed_edges_transformed_metrics.csv'
+    kgx_metrics_csv = 'arg/KGX_computed_edges_transformed_metrics.csv'
     if save_files:
         print('Save transformed metrics:')
         os.makedirs(os.path.dirname(kgx_metrics_parquet), exist_ok=True)
@@ -405,9 +639,16 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
 
     ## Compute test suite with stratified sampling:
     test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file)
+
+    ## add aditional fields for evaluation:
     test_suite = add_pubmed_links(test_suite)
     test_suite = add_biolink_links(test_suite)
+    test_suite = add_mapping(test_suite)
+    test_suite = enrich_test_suite_with_synonyms(test_suite=test_suite,column_to_search=["subject_curie", "object_curie"],column_to_create=["subject label synonyms", "object label synonyms"],service_name="edge-test-suite")
 
+    # Creating evaluation sheets
+    config_eval_json_path = "config_mapping.json"
+    create_mapped_eval_template_csv(test_suite=test_suite,mapping_json_path=config_eval_json_path,output_path="evaluation_sheet.csv")
 
     return test_suite
 
