@@ -1,0 +1,40 @@
+{
+  "row1": [
+    "ADMINISTRATIVE", "ADMINISTRATIVE", "SOURCE TEXT", "SOURCE TEXT", "SOURCE TEXT", 
+    "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", 
+    "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", 
+    "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", 
+    "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", 
+    "ASSESSMENT OUTCOME\n(completed by reviewer)"
+  ],
+  "row2": [
+    "reviewer", "pair id", "pmid", "link to abstract", "snippets", 
+    "edge type (spo category)", "subject label", "predicate", "object label", "qualified predicate", 
+    "object aspect qualifier", "object direction qualifier", "subject form or variant qualifier", 
+    "subject label synonyms", "object label synonyms", "predicate definition", "subject curie", "object curie", 
+    "original subject curie", "original object curie", "subject identified correctly", "object identified correctly", 
+    "predicate identified correctly", "relationship extracted from snippet correctly", "relationship reported in full abstract", 
+    "reviewer confidence\n(H, M, L)", "reviewer notes (optional)\n(rationale, questions, feedback)"
+  ],
+  "mapping_to_test_suite": {
+    "pair id": "id",
+    "pmid": "PMID",
+    "link to abstract": "link to abstract",
+    "snippets": "SemMedDB_sentences",
+    "edge type (spo category)": "edge type (spo category)",
+    "subject label": "subject_name",
+    "predicate": "predicate",
+    "object label": "object_name",
+    "qualified predicate": "qualified_predicate",
+    "object aspect qualifier": "object_aspect_qualifier",
+    "object direction qualifier": "object_direction_qualifier",
+    "subject form or variant qualifier": "subject_form_or_variant_qualifier",
+    "subject label synonyms": "subject label synonyms",
+    "object label synonyms": "object label synonyms",
+    "predicate definition": "predicate definition",
+    "subject curie": "subject_curie",
+    "object curie": "object_curie",
+    "original subject curie": "original_subject",
+    "original object curie": "original_object"
+  }
+}
