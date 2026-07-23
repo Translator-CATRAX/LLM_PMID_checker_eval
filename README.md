@@ -1,4 +1,7 @@
 # Evaluation of LLM_PMID_Checker
+
+Contributors: Sandrine Muller, Dan Korn, Matt Brush, David Koslicki, Sierra Moxon, Andrew Su
+
 ## Set-up
 ### Data preparation
 - create a data folder at the root of this folder
@@ -24,6 +27,7 @@ Before building the sampler, we must formalize the dimensions that impact your m
 
 ### Metrics for the sources of bias:
 
+### Auditing features from metrics:
 
 
 ### Stratified sampling:
