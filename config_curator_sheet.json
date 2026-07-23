@@ -3,9 +3,9 @@
     "ADMINISTRATIVE", "ADMINISTRATIVE", "SOURCE TEXT", "SOURCE TEXT", "SOURCE TEXT", 
     "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", "EXTRACTED EDGE", 
     "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", "SPO TERM METADATA", 
-    "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", 
-    "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", "ASSESSMENT OUTCOME\n(completed by reviewer)", 
-    "ASSESSMENT OUTCOME\n(completed by reviewer)"
+    "ASSESSMENT OUTCOME (completed by reviewer)", "ASSESSMENT OUTCOME (completed by reviewer)", "ASSESSMENT OUTCOME (completed by reviewer)", 
+    "ASSESSMENT OUTCOME (completed by reviewer)", "ASSESSMENT OUTCOME (completed by reviewer)", "ASSESSMENT OUTCOME (completed by reviewer)", 
+    "ASSESSMENT OUTCOME (completed by reviewer)"
   ],
   "row2": [
     "reviewer", "pair id", "pmid", "link to abstract", "snippets", 
@@ -14,7 +14,7 @@
     "subject label synonyms", "object label synonyms", "predicate definition", "subject curie", "object curie", 
     "original subject curie", "original object curie", "subject identified correctly", "object identified correctly", 
     "predicate identified correctly", "relationship extracted from snippet correctly", "relationship reported in full abstract", 
-    "reviewer confidence\n(H, M, L)", "reviewer notes (optional)\n(rationale, questions, feedback)"
+    "reviewer confidence (H, M, L)", "reviewer notes (optional) (rationale, questions, feedback)"
   ],
   "mapping_to_test_suite": {
     "reviewer": "reviewer",

@@ -14,6 +14,7 @@ import math
 from tqdm import tqdm
 from typing import Union, List
 import hashlib
+import tempfile
 
 
 def read_KGX(input_KGX_file,headers_of_interest = ['subject','original_subject','subject_form_or_variant_qualifier','object','original_object','object_aspect_prefix','object_direction_qualifier','predicate','qualified_predicate','publications']):
@@ -449,105 +450,78 @@ def assign_reviewers(
 
     return result.drop("base_strata_id")
 
-def create_mapped_eval_template_csv(
-    test_suite: pl.DataFrame,
-    mapping_json_path: str,
-    output_path: str
-):
-    """
-    Creates a CSV file where:
-    - Row 1 & 2 are taken directly from the JSON blueprint.
-    - Row 3 contains the names of the test_suite columns that map to Row 2.
-    - Subsequent rows contain the actual data from the test_suite.
 
-    Args:
-        test_suite: The Polars DataFrame containing the source data.
-        mapping_json_path: Path to JSON with 'row1', 'row2', and 'mapping_to_test_suite'.
-                           Mapping format: { "template_header": "test_suite_column" }
-        output_path: Path where the resulting CSV will be saved.
+def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: str, output_filename: str):
+    """
+    Creates a semi-colon separated CSV with a 2-row header structure.
+    Row 1: From config 'row1'
+    Row 2: From config 'row2'
+    Rows 3+: The data from the mapped columns of test_suite
+    
+    This version drops the 'Row 3' (source column names) from the final output.
     """
     
-    # 1. Load the configuration from JSON
-    with open(mapping_json_path, 'r', encoding='utf-8') as f:
+    # 1. Load the configuration
+    with open(config_json_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
-    row1_template = config["row1"]
-    row2_template = config["  row2" if "  row2" in config else "row2"] # Robustness check
-    # Note: Using the exact key from your provided JSON
-    row2_template = config["row2"]
-    mapping = config["mapping_to_test_suite"]
-
-    num_cols = len(row2_template)
+    row1_template = config['row1']
+    row2_template = config['row2']
+    mapping = config['mapping_to_test_suite']
     
-    # 2. Prepare structures for the output
-    # row3 will hold the names of the test_suite columns (the values from our mapping)
-    row3_values = [""] * num_cols
-    
-    # We use a list of lists to store data for each column index in the template
-    # This ensures we maintain the exact width and order of row2
-    data_columns: List[List[str]]  = [[] for _ in range(num_cols)]
+    # 2. Prepare expressions for Polars selection
+    # We use unique internal names (f"col_{i}") to avoid Polars DuplicateError
+    # if multiple columns are empty or mapped to the same name.
+    expressions = []
 
-    # Create a lookup for row2 values to find their index quickly
-    # We use a list of indices to handle potential duplicate headers if they exist
-    col_name_to_indices = {}
-    for idx, name in enumerate(row2_template):
-        if name not in col_name_to_indices:
-            col_name_to_indices[name] = []
-        col_name_to_indices[name].append(idx)
-
-    # 3. Perform the mapping and populate data
-    # In your JSON, 'template_header' is the KEY, 'test_suite_col' is the VALUE
-    for template_header, test_suite_col in mapping.items():
-        if template_header in col_name_to_indices:
-            # We map to all indices where this header appears (usually just one)
-            for idx in col_name_to_indices[template_header]:
-                
-                if test_suite_col in test_suite.columns:
-                    # Row 3 gets the name of the source column from the test_suite
-                    row3_values[idx] = test_suite_col
-                    
-                    # Fill the data rows with values from test_suite (cast to string)
-                    data_columns[idx] = test_suite[test_suite_col].cast(pl.Utf8).to_list()
-                else:
-                    print(f"Warning: Source column '{test_suite_col}' not found in test_suite.")
-        else:
-            print(f"Warning: Template header '{template_header}' not found in JSON row2.")
-
-    # 4. Construct the CSV content line by line
-    output_lines = []
-
-    def format_line(values: List[str]) -> str:
-        # Join with semicolon; handle None/Null as empty string
-        return ";".join([str(v) if v is not None else "" for v in values])
-
-    # Add Row 1 (Metadata from JSON)
-    output_lines.append(format_line(row1_template))
-    
-    # Add Row 2 (Template Headers from JSON)
-    output_lines.append(format_line(row2_template))
-    
-    # Add Row 3 (The test_suite column names aligned to the template indices)
-    output_lines.append(format_line(row3_values))
-
-    # 5. Add Data Rows (Row 4 onwards)
-    # We iterate through the number of rows in the test_suite
-    for r in range(test_suite.height):
-        current_row_data = []
-        for c in range(num_cols):
-            # If this column has data and we haven't exceeded its length, grab it
-            if r < len(data_columns[c]):
-                val = data_columns[c][r]
-                current_row_data.append(val if val is not None else "")
+    # The number of columns in the output is determined by row1 length
+    for i in range(len(row1_template)):
+        r2_key = row2_template[i]
+        internal_name = f"col_{i}"
+        
+        # Check if this column in Row 2 has a mapping to test_suite
+        if r2_key in mapping:
+            source_col_name = mapping[r2_key]
+            
+            # Check if the mapped column actually exists in the input test_suite
+            if source_col_name in test_suite.columns:
+                expressions.append(pl.col(source_col_name).alias(internal_name))
             else:
-                # If the column is empty or shorter than others, use empty string
-                current_row_data.append("")
-        output_lines.append(";".join(current_row_data))
+                # Mapped but missing from source: create an empty column
+                expressions.append(pl.lit("").alias(internal_name))
+        else:
+            # No mapping exists for this index in row2: create an empty column
+            expressions.append(pl.lit("").alias(internal_name))
 
-    # 6. Write to file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("\n".join(output_lines))
-    
-    print(f"Successfully created: {output_path}")
+    # 3. Construct the new DataFrame using a single select call
+    # This handles reordering and subsetting automatically.
+    final_df = test_suite.select(expressions)
+
+    # 4. Write the data rows to a temporary file
+    # include_header=False is used so we don't write our internal "col_0" names
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp_df_file:
+        temp_df_path = tmp_df_file.name
+        final_df.write_csv(temp_df_path, separator=";", include_header=False)
+
+    try:
+        # 5. Assemble the final file with only Row 1 and Row 2 as headers
+        with open(output_filename, 'w', encoding='utf-8') as final_file:
+            # Write Row 1
+            final_file.write(";".join(row1_template) + "\n")
+            
+            # Write Row 2
+            final_file.write(";".join(row2_template) + "\n")
+            
+            # Append the data rows (which start from what used to be Row 4)
+            with open(temp_df_path, 'r', encoding='utf-8') as tmp_f:
+                final_file.write(tmp_f.read())
+                
+        print(f"Successfully created template: {output_filename}")
+        
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(temp_df_path):
+            os.remove(temp_df_path)
 
 def enrich_test_suite_with_synonyms(
     test_suite: pl.DataFrame,
@@ -744,7 +718,7 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
 
     # Creating evaluation sheets
     config_eval_json_path = "config_curator_sheet.json"
-    create_mapped_eval_template_csv(test_suite=test_suite,mapping_json_path=config_eval_json_path,output_path="data/evaluation_sheet.csv")
+    create_mapped_eval_template_csv(test_suite,config_eval_json_path,"data/evaluation_sheet.csv")
 
     return test_suite
 
