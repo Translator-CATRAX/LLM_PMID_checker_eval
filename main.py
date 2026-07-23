@@ -331,6 +331,33 @@ def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "p
 
     return test_suite
 
+def add_pubmed_links(df):                                                                                             
+    """                                                                                                               
+    Adds a 'link to abstract' column by transforming the PMID column.                                                 
+    Removes 'PMID:' prefix and prepends the PubMed URL.                                                               
+    """                                                                                                               
+    return df.with_columns(                                                                                           
+        pl.format("https://pubmed.ncbi.nlm.nih.gov/{}",                                                               
+                  pl.col("PMID").str.replace("^PMID:", "")).alias("link to abstract")) 
+
+def add_biolink_links(df):                                                                                             
+    """                                                                                                               
+    Adds a 'predicate definition' column by transforming the predicate column.                                                 
+    Removes 'biolink:' prefix and prepends the biolink URL.                                                               
+    """                                                                                                               
+    return df.with_columns(                                                                                           
+        pl.format("https://biolink.github.io/biolink-model/{}",                                                               
+                  pl.col("predicate").str.replace("^biolink:", "")).alias("predicate definition")) 
+
+def add_mapping(df):                                                                                             
+    """                                                                                                               
+    Adds a 'edge type (spo category)' column by transforming the 'subject_biolink_category'  'predicate'  'object_biolink_category' columns.                                                 
+    Removes 'biolink:' prefix and prepends the biolink URL.                                                               
+    """                                                                                                               
+    return df.with_columns(                                                                                           
+        pl.format("https://biolink.github.io/biolink-model/{}",                                                               
+                  pl.col("predicate").str.replace("^biolink:", "")).alias("edge type (spo category)")) 
+
 def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,save_files = True):
 
 
@@ -378,6 +405,9 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
 
     ## Compute test suite with stratified sampling:
     test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file)
+    test_suite = add_pubmed_links(test_suite)
+    test_suite = add_biolink_links(test_suite)
+
 
     return test_suite
 
