@@ -240,7 +240,7 @@ def map_metrics_to_KGX(kgx_dict, category_mapping_dict):
 
     return KGX_metrics
 
-def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "publications", strata_cols=['semantic_complexity_classes','is_hub_edge','degree_assymetry_classes','biomedical_area_pair','predicted'], sample_size=4,joined_df=[]):
+def build_edges_test_suite(kg_path, model_results_path, attribute_to_review = "publications", strata_cols=['semantic_complexity_classes','structural_composite','biomedical_area_pair','predicted'], sample_size=4,joined_df=[]):
     """
     Builds a stratified test suite by joining exploded KG evidence 
     with ML predictions and sampling PMIDs per stratum.
