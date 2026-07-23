@@ -17,6 +17,7 @@
     "reviewer confidence\n(H, M, L)", "reviewer notes (optional)\n(rationale, questions, feedback)"
   ],
   "mapping_to_test_suite": {
+    "reviewer": "reviewer",
     "pair id": "id",
     "pmid": "PMID",
     "link to abstract": "link to abstract",
