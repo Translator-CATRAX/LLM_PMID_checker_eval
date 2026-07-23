@@ -367,6 +367,87 @@ def add_mapping(df):
         ).alias("edge type (spo category)")
     )
 
+def assign_reviewers(
+    df: pl.DataFrame, 
+    num_reviewers: int, 
+    overlap_ratio: float = 0.2
+) -> pl.DataFrame:
+    """
+    Assigns reviewers to strata pairs using vectorized Polars operations.
+    """
+    if df.is_empty():
+        return df.with_columns(pl.lit("none").alias("reviewer"))
+    
+    if num_reviewers < 2:
+        raise ValueError("num_reviewers must be at least 2.")
+
+    # 1. Create the reviewer ID list
+    reviewer_ids = [f"reviewer_{i}" for i in range(num_reviewers)]
+
+    # 2. Create 'base_strata_id' by stripping the '| True' or '| False' suffix
+    # FIX: Removed 'regex=True' as Polars treats patterns as regex by default
+    df = df.with_columns(
+        pl.col("strata_id")
+        .str.replace(r"\s*\|\s*(True|False)$", "")
+        .alias("base_strata_id")
+    )
+
+    # 3. Generate deterministic hashes for unique strata only
+    unique_bases = df.select("base_strata_id").unique()
+    
+    def get_hash_info(base_id: str):
+        """Helper to calculate all indices for a single stratum."""
+        # Cleaned up the redundant/broken hashlib line
+        h = int(hashlib.sha256(base_id.encode()).hexdigest(), 16)
+        return {
+            "rev_true": h % num_reviewers,
+            "rev_false": (h + 1) % num_reviewers,
+            "rev_overlap": (h + 2) % num_reviewers,
+            "is_overlap": (h % 100) < (overlap_ratio * 100)
+        }
+
+    # Apply the hash logic and alias it correctly
+    hash_mapping = (
+        unique_bases
+        .with_columns(
+            pl.col("base_strata_id").map_elements(
+                get_hash_info, 
+                return_dtype=pl.Struct([
+                    pl.Field("rev_true", pl.Int64),
+                    pl.Field("rev_false", pl.Int64),
+                    pl.Field("rev_overlap", pl.Int64),
+                    pl.Field("is_overlap", pl.Boolean)
+                ])
+            ).alias("hash_info")
+        )
+        .unnest("hash_info") 
+    )
+
+    # 4. Join the hash info back to the main dataframe
+    df = df.join(hash_mapping, on="base_strata_id", how="left")
+
+    # 5. Create the Primary DataFrame
+    df_primary = df.with_columns(
+        pl.when(pl.col("predicted") == True)
+        .then(pl.col("rev_true").cast(pl.Utf8).map_elements(lambda x: reviewer_ids[int(x)], return_dtype=pl.Utf8))
+        .otherwise(pl.col("rev_false").cast(pl.Utf8).map_elements(lambda x: reviewer_ids[int(x)], return_dtype=pl.Utf8))
+        .alias("reviewer")
+    ).drop(["rev_true", "rev_false", "rev_overlap", "is_overlap"])
+
+    # 6. Create the Duplicate DataFrame (The overlap rows)
+    df_duplicates = (
+        df.filter(pl.col("is_overlap") == True)
+        .with_columns(
+            pl.col("rev_overlap").cast(pl.Utf8).map_elements(lambda x: reviewer_ids[int(x)], return_dtype=pl.Utf8)
+            .alias("reviewer")
+        )
+        .select(df_primary.columns)
+    )
+
+    # 7. Final Assembly
+    result = pl.concat([df_primary, df_duplicates])
+
+    return result.drop("base_strata_id")
 
 def create_mapped_eval_template_csv(
     test_suite: pl.DataFrame,
@@ -649,10 +730,21 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
         test_suite.write_csv(test_suite_path_csv)
         print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_csv}")
     
+    ## assigning reviewers:
+    test_suite = assign_reviewers(test_suite,30)
+    if save_files:
+        print('Saving test suite')
+        test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_samplesize4_reviewers-assigned.parquet'
+        test_suite.write_parquet(test_suite_path_parquet, compression='snappy')
+        print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_parquet}")
+
+        test_suite_path_csv = f'data/KG_metrics_LLM_Checker_results_test_suite_samplesize4_reviewers-assigned.csv'
+        test_suite.write_csv(test_suite_path_csv)
+        print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_csv}")    
 
     # Creating evaluation sheets
-    config_eval_json_path = "config_mapping.json"
-    create_mapped_eval_template_csv(test_suite=test_suite,mapping_json_path=config_eval_json_path,output_path="evaluation_sheet.csv")
+    config_eval_json_path = "config_curator_sheet.json"
+    create_mapped_eval_template_csv(test_suite=test_suite,mapping_json_path=config_eval_json_path,output_path="data/evaluation_sheet.csv")
 
     return test_suite
 
