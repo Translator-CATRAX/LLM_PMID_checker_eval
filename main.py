@@ -375,8 +375,10 @@ def assign_reviewers(
 ) -> pl.DataFrame:
     """
     Assigns reviewers to strata pairs using vectorized Polars operations.
+    The final output is sorted alphabetically by the 'reviewer' column.
     """
     if df.is_empty():
+        # Ensure we return a DataFrame with the correct schema even if empty
         return df.with_columns(pl.lit("none").alias("reviewer"))
     
     if num_reviewers < 2:
@@ -386,7 +388,6 @@ def assign_reviewers(
     reviewer_ids = [f"reviewer_{i}" for i in range(num_reviewers)]
 
     # 2. Create 'base_strata_id' by stripping the '| True' or '| False' suffix
-    # FIX: Removed 'regex=True' as Polars treats patterns as regex by default
     df = df.with_columns(
         pl.col("strata_id")
         .str.replace(r"\s*\|\s*(True|False)$", "")
@@ -398,7 +399,6 @@ def assign_reviewers(
     
     def get_hash_info(base_id: str):
         """Helper to calculate all indices for a single stratum."""
-        # Cleaned up the redundant/broken hashlib line
         h = int(hashlib.sha256(base_id.encode()).hexdigest(), 16)
         return {
             "rev_true": h % num_reviewers,
@@ -448,8 +448,8 @@ def assign_reviewers(
     # 7. Final Assembly
     result = pl.concat([df_primary, df_duplicates])
 
-    return result.drop("base_strata_id")
-
+    # Added .sort("reviewer") here to meet your requirement
+    return result.drop("base_strata_id").sort("reviewer")
 
 def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: str, output_filename: str):
     """
