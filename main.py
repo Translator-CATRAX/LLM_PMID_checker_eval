@@ -472,7 +472,7 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
     # 2. Prepare expressions for Polars selection
     # We use unique internal names (f"col_{i}") to avoid Polars DuplicateError
     # if multiple columns are empty or mapped to the same name.
-    expressions = []
+    expressions = expressions = [pl.int_range(0, pl.len(), dtype=pl.Int64).alias("index")]
 
     # The number of columns in the output is determined by row1 length
     for i in range(len(row1_template)):
@@ -507,10 +507,10 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
         # 5. Assemble the final file with only Row 1 and Row 2 as headers
         with open(output_filename, 'w', encoding='utf-8') as final_file:
             # Write Row 1
-            final_file.write(";".join(row1_template) + "\n")
+            final_file.write("index;" + ";".join(row1_template) + "\n")
             
             # Write Row 2
-            final_file.write(";".join(row2_template) + "\n")
+            final_file.write("index;" + ";".join(row2_template) + "\n")
             
             # Append the data rows (which start from what used to be Row 4)
             with open(temp_df_path, 'r', encoding='utf-8') as tmp_f:
@@ -522,6 +522,8 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
         # Clean up the temporary file
         if os.path.exists(temp_df_path):
             os.remove(temp_df_path)
+
+
 
 def enrich_test_suite_with_synonyms(
     test_suite: pl.DataFrame,
