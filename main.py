@@ -470,9 +470,12 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
     mapping = config['mapping_to_test_suite']
     
     # 2. Prepare expressions for Polars selection
-    # We use unique internal names (f"col_{i}") to avoid Polars DuplicateError
-    # if multiple columns are empty or mapped to the same name.
-    expressions = expressions = [pl.int_range(0, pl.len(), dtype=pl.Int64).alias("index")]
+    # Check if "index" already exists in the DataFrame to avoid duplication
+    if "index" in test_suite.columns:
+        expressions = [pl.col("index")]
+    else:
+        # If not present, create it starting from 1
+        expressions = [pl.int_range(1, pl.len() + 1, dtype=pl.Int64).alias("index")]
 
     # The number of columns in the output is determined by row1 length
     for i in range(len(row1_template)):
@@ -489,9 +492,11 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
             else:
                 # Mapped but missing from source: create an empty column
                 expressions.append(pl.lit("").alias(internal_name))
+                print(f"{internal_name}:mapping exists but data missing.")
         else:
             # No mapping exists for this index in row2: create an empty column
             expressions.append(pl.lit("").alias(internal_name))
+            print(f"{internal_name}: no mapping exists, creating an empty column. ")
 
     # 3. Construct the new DataFrame using a single select call
     # This handles reordering and subsetting automatically.
@@ -698,6 +703,7 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     
     if save_files:
         print('Saving test suite')
+        test_suite = test_suite.with_columns(index=pl.int_range(1, pl.len() + 1))
         test_suite_path_parquet = f'data/KG_metrics_LLM_Checker_results_test_suite_samplesize4.parquet'
         test_suite.write_parquet(test_suite_path_parquet, compression='snappy')
         print(f"Successfully saved {len(test_suite)} edges to: {test_suite_path_parquet}")
