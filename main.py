@@ -492,11 +492,11 @@ def create_mapped_eval_template_csv(test_suite: pl.DataFrame, config_json_path: 
             else:
                 # Mapped but missing from source: create an empty column
                 expressions.append(pl.lit("").alias(internal_name))
-                print(f"{internal_name}:mapping exists but data missing.")
+                print(f"{r2_key}:{source_col_name}:mapping exists but data missing.")
         else:
             # No mapping exists for this index in row2: create an empty column
             expressions.append(pl.lit("").alias(internal_name))
-            print(f"{internal_name}: no mapping exists, creating an empty column. ")
+            print(f"{r2_key}: no mapping exists, creating an empty column. ")
 
     # 3. Construct the new DataFrame using a single select call
     # This handles reordering and subsetting automatically.
@@ -695,6 +695,7 @@ def main(input_KGX_file,biolink_id_to_category_mapping,LLM_checker_results_file,
     ## Compute test suite with stratified sampling:
     test_suite = build_edges_test_suite(kgx_metrics_parquet, LLM_checker_results_file)
 
+    ## PREPARING FOR EVALUATION FILE:
     ## add aditional fields for evaluation:
     test_suite = add_pubmed_links(test_suite)
     test_suite = add_biolink_links(test_suite)
