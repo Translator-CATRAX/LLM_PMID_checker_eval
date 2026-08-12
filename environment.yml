@@ -1,0 +1,18 @@
+name: llm-pmid-checker-eval                                                                                                                                                                            
+channels:                                                                                                                                                                                              
+  - conda-forge                                                                                                                                                                                        
+dependencies:                                                                                                                                                                                          
+  - python=3.12                                                                                                                                                  
+  - numpy                                                                                                                                                                                              
+  - pymc                                                                                                                                                                                               
+  - arviz                                                                                                                                                                                              
+  - pytensor
+  - polars
+  - pyarrow
+  - tqdm                                                                                                                                                                               
+  - m2w64-toolchain                                                                                                                              
+  - pip                                                                                                                                                                                              
+  - pip:                                                                                                                                                                                               
+    # Si vous avez des packages qui n'existent QUE sur PyPI,                                                                                                                                           
+    # listez-les ici comme dans votre pyproject.toml                                                                                                                                                   
+    - bmt
