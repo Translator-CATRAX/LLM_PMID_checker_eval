@@ -1,0 +1,5 @@
+columns:
+  obs_item: "item_id"
+  obs_rater: "rater_id"
+  obs_rating: ["triple rating","relevance rating"]
+  item_strata: "strata"
